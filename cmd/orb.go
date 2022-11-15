@@ -17,14 +17,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/api"
-	"github.com/CircleCI-Public/circleci-cli/api/graphql"
-	"github.com/CircleCI-Public/circleci-cli/filetree"
-	"github.com/CircleCI-Public/circleci-cli/process"
-	"github.com/CircleCI-Public/circleci-cli/prompt"
-	"github.com/CircleCI-Public/circleci-cli/references"
-	"github.com/CircleCI-Public/circleci-cli/settings"
-	"github.com/CircleCI-Public/circleci-cli/version"
+	"github.com/healx/circleci-cli/api"
+	"github.com/healx/circleci-cli/api/graphql"
+	"github.com/healx/circleci-cli/filetree"
+	"github.com/healx/circleci-cli/process"
+	"github.com/healx/circleci-cli/prompt"
+	"github.com/healx/circleci-cli/references"
+	"github.com/healx/circleci-cli/settings"
+	"github.com/healx/circleci-cli/version"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -1055,7 +1055,7 @@ func inlineIncludes(node *yaml.Node, orbRoot string) error {
 func initOrb(opts orbOptions) error {
 	orbPath := opts.args[0]
 	var err error
-	fmt.Println("Note: This command is in preview. Please report any bugs! https://github.com/CircleCI-Public/circleci-cli/issues/new/choose")
+	fmt.Println("Note: This command is in preview. Please report any bugs! https://github.com/healx/circleci-cli/issues/new/choose")
 
 	fullyAutomated := 0
 	prompt := &survey.Select{

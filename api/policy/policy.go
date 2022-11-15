@@ -12,9 +12,9 @@ import (
 
 	"github.com/CircleCI-Public/circle-policy-agent/cpa"
 
-	"github.com/CircleCI-Public/circleci-cli/api/header"
-	"github.com/CircleCI-Public/circleci-cli/settings"
-	"github.com/CircleCI-Public/circleci-cli/version"
+	"github.com/healx/circleci-cli/api/header"
+	"github.com/healx/circleci-cli/settings"
+	"github.com/healx/circleci-cli/version"
 )
 
 // Policy-service endpoints documentation : https://github.com/circleci/policy-service/blob/main/cmd/server/openapi.yaml

@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/CircleCI-Public/circleci-cli/proxy"
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/proxy"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/spf13/cobra"
 )
 

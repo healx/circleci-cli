@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/CircleCI-Public/circleci-cli/git"
+	"github.com/healx/circleci-cli/git"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )

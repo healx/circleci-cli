@@ -12,9 +12,9 @@ import (
 
 	"gotest.tools/v3/golden"
 
-	"github.com/CircleCI-Public/circleci-cli/api"
-	"github.com/CircleCI-Public/circleci-cli/api/graphql"
-	"github.com/CircleCI-Public/circleci-cli/clitest"
+	"github.com/healx/circleci-cli/api"
+	"github.com/healx/circleci-cli/api/graphql"
+	"github.com/healx/circleci-cli/clitest"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"

@@ -6,8 +6,8 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 
-	"github.com/CircleCI-Public/circleci-cli/api/runner"
-	"github.com/CircleCI-Public/circleci-cli/cmd/validator"
+	"github.com/healx/circleci-cli/api/runner"
+	"github.com/healx/circleci-cli/cmd/validator"
 )
 
 func newResourceClassCommand(o *runnerOpts, preRunE validator.Validator) *cobra.Command {

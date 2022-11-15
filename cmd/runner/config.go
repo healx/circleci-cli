@@ -5,7 +5,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/CircleCI-Public/circleci-cli/api/runner"
+	"github.com/healx/circleci-cli/api/runner"
 )
 
 func generateConfig(t runner.Token, w io.Writer) (err error) {

@@ -12,8 +12,8 @@ import (
 	"github.com/CircleCI-Public/circle-policy-agent/cpa"
 	"gotest.tools/v3/assert"
 
-	"github.com/CircleCI-Public/circleci-cli/settings"
-	"github.com/CircleCI-Public/circleci-cli/version"
+	"github.com/healx/circleci-cli/settings"
+	"github.com/healx/circleci-cli/version"
 )
 
 func TestClientFetchPolicyBundle(t *testing.T) {

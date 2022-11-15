@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/CircleCI-Public/circleci-cli/api/header"
-	"github.com/CircleCI-Public/circleci-cli/settings"
-	"github.com/CircleCI-Public/circleci-cli/version"
+	"github.com/healx/circleci-cli/api/header"
+	"github.com/healx/circleci-cli/settings"
+	"github.com/healx/circleci-cli/version"
 )
 
 // InfoClient An interface with all the Info Functions.

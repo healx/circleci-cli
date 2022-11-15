@@ -10,10 +10,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/CircleCI-Public/circleci-cli/api"
-	"github.com/CircleCI-Public/circleci-cli/api/graphql"
-	"github.com/CircleCI-Public/circleci-cli/pipeline"
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/api"
+	"github.com/healx/circleci-cli/api/graphql"
+	"github.com/healx/circleci-cli/pipeline"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 )
@@ -231,7 +231,7 @@ func generateDockerCommand(configPath, image, pwd string, arguments ...string) [
 
 // Convert the given flag back into a list of strings suitable to be passed on
 // the command line to run docker.
-// https://github.com/CircleCI-Public/circleci-cli/issues/391
+// https://github.com/healx/circleci-cli/issues/391
 func unparseFlag(flags *pflag.FlagSet, flag *pflag.Flag) []string {
 	flagName := "--" + flag.Name
 	result := []string{}

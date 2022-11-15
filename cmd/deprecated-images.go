@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/CircleCI-Public/circleci-cli/api"
+	"github.com/healx/circleci-cli/api"
 
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"

@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/CircleCI-Public/circleci-cli/git"
+	"github.com/healx/circleci-cli/git"
 	"github.com/pkg/browser"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"

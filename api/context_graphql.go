@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/api/graphql"
+	"github.com/healx/circleci-cli/api/graphql"
 	"github.com/pkg/errors"
 )
 

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/settings"
 	"gotest.tools/v3/assert"
 )
 

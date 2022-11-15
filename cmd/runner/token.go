@@ -3,7 +3,7 @@ package runner
 import (
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/cmd/validator"
+	"github.com/healx/circleci-cli/cmd/validator"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )

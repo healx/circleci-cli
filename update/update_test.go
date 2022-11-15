@@ -1,8 +1,8 @@
 package update_test
 
 import (
-	"github.com/CircleCI-Public/circleci-cli/update"
 	"github.com/blang/semver"
+	"github.com/healx/circleci-cli/update"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )

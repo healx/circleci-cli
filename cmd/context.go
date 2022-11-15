@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/api"
 	"github.com/google/uuid"
+	"github.com/healx/circleci-cli/api"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/spf13/cobra"
 )
 

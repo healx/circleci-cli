@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/settings"
 	"github.com/blang/semver"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/pkg/errors"
 	"github.com/rhysd/go-github-selfupdate/selfupdate"
 )
@@ -73,7 +73,7 @@ func checkFromSource(check *Options) error {
 // So `1.2.3 revision 4` becomes `1.2.3_4`. This fails to parse as valid semver
 // version. We can work around this by replacing underscores with `-` to convert
 // the revision to a semver tag.
-// https://github.com/CircleCI-Public/circleci-cli/issues/610
+// https://github.com/healx/circleci-cli/issues/610
 func ParseHomebrewVersion(homebrewVesion string) (semver.Version, error) {
 
 	withRevisionAsTag := strings.Replace(homebrewVesion, "_", "-", 10)
@@ -250,7 +250,7 @@ func HowToUpdate(opts *Options) string {
 	case "source":
 		return strings.Join([]string{
 			"You can visit the Github releases page for the CLI to manually download and install:",
-			"https://github.com/CircleCI-Public/circleci-cli/releases",
+			"https://github.com/healx/circleci-cli/releases",
 		}, "\n")
 	}
 

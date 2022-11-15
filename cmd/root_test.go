@@ -8,8 +8,8 @@ import (
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
 
-	"github.com/CircleCI-Public/circleci-cli/clitest"
-	"github.com/CircleCI-Public/circleci-cli/cmd"
+	"github.com/healx/circleci-cli/clitest"
+	"github.com/healx/circleci-cli/cmd"
 )
 
 var _ = Describe("Root", func() {
@@ -31,9 +31,9 @@ var _ = Describe("Root", func() {
 		BeforeEach(func() {
 			tempSettings = clitest.WithTempSettings()
 
-			noUpdateCLI, err = gexec.Build("github.com/CircleCI-Public/circleci-cli",
+			noUpdateCLI, err = gexec.Build("github.com/healx/circleci-cli",
 				"-ldflags",
-				"-X github.com/CircleCI-Public/circleci-cli/version.packageManager=homebrew",
+				"-X github.com/healx/circleci-cli/version.packageManager=homebrew",
 			)
 			Expect(err).ShouldNot(HaveOccurred())
 		})
@@ -78,7 +78,7 @@ var _ = Describe("Root", func() {
 		)
 
 		BeforeEach(func() {
-			updateCLI, err = gexec.Build("github.com/CircleCI-Public/circleci-cli")
+			updateCLI, err = gexec.Build("github.com/healx/circleci-cli")
 			Expect(err).ShouldNot(HaveOccurred())
 
 			command = exec.Command(updateCLI, "help",

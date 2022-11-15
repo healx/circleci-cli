@@ -14,14 +14,14 @@ import (
 )
 
 var introHeader = `
-[Readme](https://github.com/CircleCI-Public/circleci-cli#readme) |
-[Code of Conduct](https://github.com/CircleCI-Public/circleci-cli/blob/master/CODE_OF_CONDUCT.md) |
-[Contribution Guidelines](https://github.com/CircleCI-Public/circleci-cli/blob/master/CONTRIBUTING.md) |
-[Hacking](https://github.com/CircleCI-Public/circleci-cli/blob/master/HACKING.md)
+[Readme](https://github.com/healx/circleci-cli#readme) |
+[Code of Conduct](https://github.com/healx/circleci-cli/blob/master/CODE_OF_CONDUCT.md) |
+[Contribution Guidelines](https://github.com/healx/circleci-cli/blob/master/CONTRIBUTING.md) |
+[Hacking](https://github.com/healx/circleci-cli/blob/master/HACKING.md)
 
 [![CircleCI](https://circleci.com/gh/CircleCI-Public/circleci-cli.svg?style=svg)](https://circleci.com/gh/CircleCI-Public/circleci-cli)
-[![GitHub release](https://img.shields.io/github/tag/CircleCI-Public/circleci-cli.svg?label=latest)](https://github.com/CircleCI-Public/circleci-cli/releases)
-[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/CircleCI-Public/circleci-cli)
+[![GitHub release](https://img.shields.io/github/tag/CircleCI-Public/circleci-cli.svg?label=latest)](https://github.com/healx/circleci-cli/releases)
+[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/healx/circleci-cli)
 [![License](https://img.shields.io/badge/license-MIT-red.svg)](./LICENSE)
 `
 

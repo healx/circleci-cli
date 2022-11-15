@@ -6,15 +6,15 @@ import (
 	"os"
 	"strings"
 
-	"github.com/CircleCI-Public/circleci-cli/api/header"
-	"github.com/CircleCI-Public/circleci-cli/cmd/info"
-	"github.com/CircleCI-Public/circleci-cli/cmd/policy"
-	"github.com/CircleCI-Public/circleci-cli/cmd/runner"
-	"github.com/CircleCI-Public/circleci-cli/data"
-	"github.com/CircleCI-Public/circleci-cli/md_docs"
-	"github.com/CircleCI-Public/circleci-cli/settings"
-	"github.com/CircleCI-Public/circleci-cli/version"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/healx/circleci-cli/api/header"
+	"github.com/healx/circleci-cli/cmd/info"
+	"github.com/healx/circleci-cli/cmd/policy"
+	"github.com/healx/circleci-cli/cmd/runner"
+	"github.com/healx/circleci-cli/data"
+	"github.com/healx/circleci-cli/md_docs"
+	"github.com/healx/circleci-cli/settings"
+	"github.com/healx/circleci-cli/version"
 	"github.com/spf13/cobra"
 )
 

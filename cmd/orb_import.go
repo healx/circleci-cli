@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/CircleCI-Public/circleci-cli/api"
-	"github.com/CircleCI-Public/circleci-cli/api/graphql"
+	"github.com/healx/circleci-cli/api"
+	"github.com/healx/circleci-cli/api/graphql"
 )
 
 type orbImportPlan struct {

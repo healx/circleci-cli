@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/CircleCI-Public/circleci-cli/clitest"
+	"github.com/healx/circleci-cli/clitest"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
@@ -88,7 +88,7 @@ var _ = Describe("Update", func() {
 			Eventually(session.Out).Should(gbytes.Say("A new release is available (.*)"))
 
 			Eventually(session.Out).Should(gbytes.Say("You can visit the Github releases page for the CLI to manually download and install:"))
-			Eventually(session.Out).Should(gbytes.Say("https://github.com/CircleCI-Public/circleci-cli/releases"))
+			Eventually(session.Out).Should(gbytes.Say("https://github.com/healx/circleci-cli/releases"))
 
 			Eventually(session).Should(gexec.Exit(0))
 		})
@@ -110,7 +110,7 @@ var _ = Describe("Update", func() {
 			Eventually(session.Out).Should(gbytes.Say("A new release is available (.*)"))
 
 			Eventually(session.Out).Should(gbytes.Say("You can visit the Github releases page for the CLI to manually download and install:"))
-			Eventually(session.Out).Should(gbytes.Say("https://github.com/CircleCI-Public/circleci-cli/releases"))
+			Eventually(session.Out).Should(gbytes.Say("https://github.com/healx/circleci-cli/releases"))
 
 			Eventually(session.Err.Contents()).Should(BeEmpty())
 			Eventually(session).Should(gexec.Exit(0))
@@ -119,7 +119,7 @@ var _ = Describe("Update", func() {
 
 	Describe("update", func() {
 		BeforeEach(func() {
-			updateCLI, err := gexec.Build("github.com/CircleCI-Public/circleci-cli")
+			updateCLI, err := gexec.Build("github.com/healx/circleci-cli")
 			Expect(err).ShouldNot(HaveOccurred())
 
 			command = exec.Command(updateCLI,
@@ -182,7 +182,7 @@ var _ = Describe("Update", func() {
 			//
 			// However this may be difficult to change, since all commands that return
 			// an error after executing cause the program to exit with a non-zero code:
-			// https://github.com/CircleCI-Public/circleci-cli/blob/5896baa95dad1b66f9c4a5b0a14571717c92aa55/cmd/root.go#L38
+			// https://github.com/healx/circleci-cli/blob/5896baa95dad1b66f9c4a5b0a14571717c92aa55/cmd/root.go#L38
 			stderr := session.Wait().Err.Contents()
 			Expect(string(stderr)).To(ContainSubstring(`Error: Failed to query the GitHub API for updates.
 

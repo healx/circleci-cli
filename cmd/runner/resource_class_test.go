@@ -11,7 +11,7 @@ import (
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 
-	"github.com/CircleCI-Public/circleci-cli/api/runner"
+	"github.com/healx/circleci-cli/api/runner"
 )
 
 func Test_ResourceClass(t *testing.T) {

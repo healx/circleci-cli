@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/api/rest"
+	"github.com/healx/circleci-cli/api/rest"
 )
 
 type Runner struct {

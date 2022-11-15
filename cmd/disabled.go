@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/CircleCI-Public/circleci-cli/settings"
-	"github.com/CircleCI-Public/circleci-cli/version"
+	"github.com/healx/circleci-cli/settings"
+	"github.com/healx/circleci-cli/version"
 	"github.com/spf13/cobra"
 )
 

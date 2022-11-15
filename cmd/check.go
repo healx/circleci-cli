@@ -5,10 +5,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/settings"
-	"github.com/CircleCI-Public/circleci-cli/update"
-	"github.com/CircleCI-Public/circleci-cli/version"
 	"github.com/briandowns/spinner"
+	"github.com/healx/circleci-cli/settings"
+	"github.com/healx/circleci-cli/update"
+	"github.com/healx/circleci-cli/version"
 )
 
 func checkForUpdates(opts *settings.Config) error {

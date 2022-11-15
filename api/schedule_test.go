@@ -8,7 +8,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
-	"github.com/CircleCI-Public/circleci-cli/mock"
+	"github.com/healx/circleci-cli/mock"
 )
 
 // Returns a static mock schedule.

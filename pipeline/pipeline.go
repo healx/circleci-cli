@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/CircleCI-Public/circleci-cli/git"
+	"github.com/healx/circleci-cli/git"
 )
 
 // CircleCI provides various `<< pipeline.x >>` values to be used in your config, but sometimes we need to fabricate those values when validating config.
@@ -17,7 +17,7 @@ type Parameters map[string]interface{}
 // << pipeline.parameters.foo >>
 func LocalPipelineValues() Values {
 	revision := git.Revision()
-	gitUrl := "https://github.com/CircleCI-Public/circleci-cli"
+	gitUrl := "https://github.com/healx/circleci-cli"
 	projectType := "github"
 
 	// If we encounter an error infering project, skip this and use defaults.

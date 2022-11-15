@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 
-	"github.com/CircleCI-Public/circleci-cli/api/graphql"
+	"github.com/healx/circleci-cli/api/graphql"
 
 	// we can't dot-import ginkgo because api.Context is a thing.
 	"github.com/onsi/ginkgo"

@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/CircleCI-Public/circleci-cli/cmd/validator"
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/cmd/validator"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/spf13/cobra"
 	"gotest.tools/v3/assert"
 )

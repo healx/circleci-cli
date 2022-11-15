@@ -5,8 +5,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/clitest"
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/clitest"
+	"github.com/healx/circleci-cli/settings"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
@@ -24,7 +24,7 @@ var _ = Describe("Check", func() {
 	)
 
 	BeforeEach(func() {
-		checkCLI, err = gexec.Build("github.com/CircleCI-Public/circleci-cli")
+		checkCLI, err = gexec.Build("github.com/healx/circleci-cli")
 		Expect(err).ShouldNot(HaveOccurred())
 
 		tempSettings = clitest.WithTempSettings()
@@ -50,9 +50,9 @@ var _ = Describe("Check", func() {
 		var response string
 
 		BeforeEach(func() {
-			checkCLI, err = gexec.Build("github.com/CircleCI-Public/circleci-cli",
+			checkCLI, err = gexec.Build("github.com/healx/circleci-cli",
 				"-ldflags",
-				"-X github.com/CircleCI-Public/circleci-cli/cmd.AutoUpdate=false -X github.com/CircleCI-Public/circleci-cli/version.packageManager=release",
+				"-X github.com/healx/circleci-cli/cmd.AutoUpdate=false -X github.com/healx/circleci-cli/version.packageManager=release",
 			)
 			Expect(err).ShouldNot(HaveOccurred())
 

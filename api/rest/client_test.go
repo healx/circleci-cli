@@ -12,8 +12,8 @@ import (
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 
-	"github.com/CircleCI-Public/circleci-cli/settings"
-	"github.com/CircleCI-Public/circleci-cli/version"
+	"github.com/healx/circleci-cli/settings"
+	"github.com/healx/circleci-cli/version"
 )
 
 func TestClient_DoRequest(t *testing.T) {

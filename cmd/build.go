@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/CircleCI-Public/circleci-cli/local"
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/local"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/spf13/cobra"
 )
 

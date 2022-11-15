@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Install the CircleCI CLI tool.
-# https://github.com/CircleCI-Public/circleci-cli
+# https://github.com/healx/circleci-cli
 #
 # Dependencies: curl, cut
 #
@@ -13,7 +13,7 @@ set -o errexit
 echo "Starting installation."
 
 # GitHub's URL for the latest release, will redirect.
-GITHUB_BASE_URL="https://github.com/CircleCI-Public/circleci-cli"
+GITHUB_BASE_URL="https://github.com/healx/circleci-cli"
 LATEST_URL="${GITHUB_BASE_URL}/releases/latest/"
 DESTDIR="${DESTDIR:-/usr/local/bin}"
 

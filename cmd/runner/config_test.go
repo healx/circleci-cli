@@ -8,7 +8,7 @@ import (
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/golden"
 
-	"github.com/CircleCI-Public/circleci-cli/api/runner"
+	"github.com/healx/circleci-cli/api/runner"
 )
 
 func Test_generateConfig(t *testing.T) {

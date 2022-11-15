@@ -17,10 +17,10 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/CircleCI-Public/circleci-cli/api/policy"
-	"github.com/CircleCI-Public/circleci-cli/cmd/validator"
+	"github.com/healx/circleci-cli/api/policy"
+	"github.com/healx/circleci-cli/cmd/validator"
 
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/settings"
 )
 
 // NewCommand creates the root policy command with all policy subcommands attached.

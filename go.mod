@@ -1,4 +1,4 @@
-module github.com/CircleCI-Public/circleci-cli
+module github.com/healx/circleci-cli
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.1.1

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/data"
+	"github.com/healx/circleci-cli/data"
 	yaml "gopkg.in/yaml.v3"
 )
 

@@ -1,7 +1,7 @@
 package references_test
 
 import (
-	"github.com/CircleCI-Public/circleci-cli/references"
+	"github.com/healx/circleci-cli/references"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )

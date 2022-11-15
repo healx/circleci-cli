@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/CircleCI-Public/circleci-cli/api"
-	"github.com/CircleCI-Public/circleci-cli/api/graphql"
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/api"
+	"github.com/healx/circleci-cli/api/graphql"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/spf13/cobra"
 )
 

@@ -12,8 +12,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/CircleCI-Public/circleci-cli/api/header"
-	"github.com/CircleCI-Public/circleci-cli/version"
+	"github.com/healx/circleci-cli/api/header"
+	"github.com/healx/circleci-cli/version"
 	"github.com/pkg/errors"
 )
 

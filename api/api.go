@@ -10,11 +10,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/CircleCI-Public/circleci-cli/api/graphql"
-	"github.com/CircleCI-Public/circleci-cli/pipeline"
-	"github.com/CircleCI-Public/circleci-cli/references"
-	"github.com/CircleCI-Public/circleci-cli/settings"
 	"github.com/Masterminds/semver"
+	"github.com/healx/circleci-cli/api/graphql"
+	"github.com/healx/circleci-cli/pipeline"
+	"github.com/healx/circleci-cli/references"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 )

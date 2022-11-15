@@ -1,9 +1,9 @@
 package info
 
 import (
-	"github.com/CircleCI-Public/circleci-cli/api/info"
-	"github.com/CircleCI-Public/circleci-cli/cmd/validator"
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/api/info"
+	"github.com/healx/circleci-cli/cmd/validator"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/olekukonko/tablewriter"
 
 	"github.com/spf13/cobra"

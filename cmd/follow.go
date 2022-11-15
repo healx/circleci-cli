@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/CircleCI-Public/circleci-cli/api"
-	"github.com/CircleCI-Public/circleci-cli/git"
-	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/healx/circleci-cli/api"
+	"github.com/healx/circleci-cli/git"
+	"github.com/healx/circleci-cli/settings"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
