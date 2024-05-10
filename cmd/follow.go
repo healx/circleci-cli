@@ -6,6 +6,7 @@ import (
 	"github.com/CircleCI-Public/circleci-cli/api"
 	"github.com/CircleCI-Public/circleci-cli/git"
 	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/CircleCI-Public/circleci-cli/telemetry"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -52,10 +53,18 @@ func followProjectCommand(config *settings.Config) *cobra.Command {
 	}
 	followCommand := &cobra.Command{
 		Use:   "follow",
-		Short: "Attempt to follow the project for the current git repository.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return followProject(opts)
+		Short: "Attempt to follow the project for the current git repository.\nThis command is intended to be run from a git repository with a remote named 'origin' that is hosted on Github or Bitbucket only. NOTE: this command is deprecated and is not reliable on Github projects created after September 2023",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			err := followProject(opts)
+
+			telemetryClient, ok := telemetry.FromContext(cmd.Context())
+			if ok {
+				_ = telemetryClient.Track(telemetry.CreateFollowEvent(err))
+			}
+
+			return err
 		},
+		Deprecated: "This command is deprecated and is not reliable on Github projects created after September 2023",
 	}
 	return followCommand
 }

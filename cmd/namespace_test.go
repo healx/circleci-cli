@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"github.com/CircleCI-Public/circleci-cli/clitest"
+	"github.com/CircleCI-Public/circleci-cli/telemetry"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
@@ -25,6 +26,42 @@ var _ = Describe("Namespace integration tests", func() {
 
 	AfterEach(func() {
 		tempSettings.Close()
+	})
+
+	Describe("telemetry", func() {
+		It("sends expected event", func() {
+			command = exec.Command(pathCLI,
+				"namespace", "create",
+				"--skip-update-check",
+				"--token", token,
+				"--host", tempSettings.TestServer.URL(),
+				"--integration-testing",
+				"foo-ns",
+				"--org-id", `"bb604b45-b6b0-4b81-ad80-796f15eddf87"`,
+			)
+			command.Env = append(command.Env, fmt.Sprintf("MOCK_TELEMETRY=%s", tempSettings.TelemetryDestPath))
+
+			tempSettings.TestServer.AppendHandlers(func(res http.ResponseWriter, req *http.Request) {
+				res.WriteHeader(http.StatusOK)
+				_, _ = res.Write([]byte(`{"data":{"organization":{"name":"test-org","id":"bb604b45-b6b0-4b81-ad80-796f15eddf87"}}}`))
+			})
+
+			session, err := gexec.Start(command, GinkgoWriter, GinkgoWriter)
+			Expect(err).ShouldNot(HaveOccurred())
+			Eventually(session).Should(gexec.Exit(0))
+
+			clitest.CompareTelemetryEvent(tempSettings, []telemetry.Event{
+				telemetry.CreateNamespaceEvent(telemetry.CommandInfo{
+					Name: "create",
+					LocalArgs: map[string]string{
+						"help":                "false",
+						"integration-testing": "true",
+						"no-prompt":           "false",
+						"org-id":              "\"bb604b45-b6b0-4b81-ad80-796f15eddf87\"",
+					},
+				}),
+			})
+		})
 	})
 
 	Context("create, with interactive prompts", func() {
@@ -108,7 +145,12 @@ Please note that any orbs you publish in this namespace are open orbs and are wo
   				}`
 
 				expectedOrganizationRequest := `{
-            "query": "query($organizationName: String!, $organizationVcs: VCSType!) {\n\t\t\t\torganization(\n\t\t\t\t\tname: $organizationName\n\t\t\t\t\tvcsType: $organizationVcs\n\t\t\t\t) {\n\t\t\t\t\tid\n\t\t\t\t}\n\t\t\t}","variables":{"organizationName":"test-org","organizationVcs":"BITBUCKET"}}`
+	"query": "query($orgName: String!, $vcsType: VCSType!) {\n\torganization(name: $orgName, vcsType: $vcsType) {\n\t\tid\n\t\tname\n\t\tvcsType\n\t}\n}",
+	"variables": {
+		"orgName": "test-org",
+		"vcsType": "BITBUCKET"
+	}
+}`
 
 				gqlNsResponse := `{
 									"createNamespace": {
@@ -180,12 +222,12 @@ Please note that any orbs you publish in this namespace are open orbs and are wo
   				}`
 
 				expectedOrganizationRequest := `{
-            "query": "query($organizationName: String!, $organizationVcs: VCSType!) {\n\t\t\t\torganization(\n\t\t\t\t\tname: $organizationName\n\t\t\t\t\tvcsType: $organizationVcs\n\t\t\t\t) {\n\t\t\t\t\tid\n\t\t\t\t}\n\t\t\t}",
-            "variables": {
-              "organizationName": "test-org",
-              "organizationVcs": "BITBUCKET"
-            }
-          }`
+	"query": "query($orgName: String!, $vcsType: VCSType!) {\n\torganization(name: $orgName, vcsType: $vcsType) {\n\t\tid\n\t\tname\n\t\tvcsType\n\t}\n}",
+	"variables": {
+		"orgName": "test-org",
+		"vcsType": "BITBUCKET"
+	}
+}`
 
 				gqlNsResponse := `{
 									"createNamespace": {
@@ -242,12 +284,12 @@ Please note that any orbs you publish in this namespace are open orbs and are wo
   				}`
 
 				expectedOrganizationRequest := `{
-            "query": "query($organizationName: String!, $organizationVcs: VCSType!) {\n\t\t\t\torganization(\n\t\t\t\t\tname: $organizationName\n\t\t\t\t\tvcsType: $organizationVcs\n\t\t\t\t) {\n\t\t\t\t\tid\n\t\t\t\t}\n\t\t\t}",
-            "variables": {
-              "organizationName": "test-org",
-              "organizationVcs": "BITBUCKET"
-            }
-          }`
+	"query": "query($orgName: String!, $vcsType: VCSType!) {\n\torganization(name: $orgName, vcsType: $vcsType) {\n\t\tid\n\t\tname\n\t\tvcsType\n\t}\n}",
+	"variables": {
+		"orgName": "test-org",
+		"vcsType": "BITBUCKET"
+	}
+}`
 
 				gqlResponse := `{
 									"createNamespace": {

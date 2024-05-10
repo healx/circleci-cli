@@ -3,11 +3,11 @@ package rest
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -17,28 +17,44 @@ import (
 )
 
 type Client struct {
-	baseURL     *url.URL
+	BaseURL     *url.URL
 	circleToken string
 	client      *http.Client
 }
 
-func New(host string, config *settings.Config) *Client {
+func New(baseURL *url.URL, token string, httpClient *http.Client) *Client {
+	return &Client{
+		BaseURL:     baseURL,
+		circleToken: token,
+		client:      httpClient,
+	}
+}
+
+func NewFromConfig(host string, config *settings.Config) *Client {
 	// Ensure endpoint ends with a slash
 	endpoint := config.RestEndpoint
 	if !strings.HasSuffix(endpoint, "/") {
 		endpoint += "/"
 	}
 
-	u, _ := url.Parse(host)
+	baseURL, _ := url.Parse(host)
+	timeout := header.GetDefaultTimeout()
+	if timeoutEnv, ok := os.LookupEnv("CIRCLECI_CLI_TIMEOUT"); ok {
+		if parsedTimeout, err := time.ParseDuration(timeoutEnv); err == nil {
+			timeout = parsedTimeout
+		} else {
+			fmt.Printf("failed to parse CIRCLECI_CLI_TIMEOUT: %s\n", err.Error())
+		}
+	}
 
 	client := config.HTTPClient
-	client.Timeout = 10 * time.Second
+	client.Timeout = timeout
 
-	return &Client{
-		baseURL:     u.ResolveReference(&url.URL{Path: endpoint}),
-		circleToken: config.Token,
-		client:      client,
-	}
+	return New(
+		baseURL.ResolveReference(&url.URL{Path: endpoint}),
+		config.Token,
+		client,
+	)
 }
 
 func (c *Client) NewRequest(method string, u *url.URL, payload interface{}) (req *http.Request, err error) {
@@ -52,12 +68,19 @@ func (c *Client) NewRequest(method string, u *url.URL, payload interface{}) (req
 		}
 	}
 
-	req, err = http.NewRequest(method, c.baseURL.ResolveReference(u).String(), r)
+	req, err = http.NewRequest(method, c.BaseURL.ResolveReference(u).String(), r)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Circle-Token", c.circleToken)
+	c.enrichRequestHeaders(req, payload)
+	return req, nil
+}
+
+func (c *Client) enrichRequestHeaders(req *http.Request, payload interface{}) {
+	if c.circleToken != "" {
+		req.Header.Set("Circle-Token", c.circleToken)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", version.UserAgent())
 	commandStr := header.GetCommandStr()
@@ -67,30 +90,35 @@ func (c *Client) NewRequest(method string, u *url.URL, payload interface{}) (req
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	return req, nil
 }
 
-func (c *Client) DoRequest(req *http.Request, resp interface{}) (statusCode int, err error) {
+func (c *Client) DoRequest(req *http.Request, resp interface{}) (int, error) {
 	httpResp, err := c.client.Do(req)
 	if err != nil {
+		fmt.Printf("failed to make http request: %s\n", err.Error())
 		return 0, err
 	}
 	defer httpResp.Body.Close()
 
-	if httpResp.StatusCode >= 300 {
-		httpError := struct {
+	if httpResp.StatusCode >= 400 {
+		var msgErr struct {
 			Message string `json:"message"`
-		}{}
-		err = json.NewDecoder(httpResp.Body).Decode(&httpError)
+		}
+		body, err := io.ReadAll(httpResp.Body)
 		if err != nil {
 			return httpResp.StatusCode, err
 		}
-		return httpResp.StatusCode, &HTTPError{Code: httpResp.StatusCode, Message: httpError.Message}
+		err = json.Unmarshal(body, &msgErr)
+		if err != nil {
+			return httpResp.StatusCode, &HTTPError{Code: httpResp.StatusCode, Message: string(body)}
+		}
+		return httpResp.StatusCode, &HTTPError{Code: httpResp.StatusCode, Message: msgErr.Message}
 	}
 
 	if resp != nil {
 		if !strings.Contains(httpResp.Header.Get("Content-Type"), "application/json") {
-			return httpResp.StatusCode, errors.New("wrong content type received")
+			body, _ := io.ReadAll(httpResp.Body)
+			return httpResp.StatusCode, fmt.Errorf("wrong content type received. method: %s. path: %s. content-type: %s. body: %s", req.Method, req.URL.Path, httpResp.Header.Get("Content-Type"), string(body))
 		}
 
 		err = json.NewDecoder(httpResp.Body).Decode(resp)

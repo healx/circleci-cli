@@ -4,7 +4,7 @@ GOOS=$(shell go env GOOS)
 GOARCH=$(shell go env GOARCH)
 
 build: always
-	go build -o build/$(GOOS)/$(GOARCH)/circleci
+	go build -o build/$(GOOS)/$(GOARCH)/circleci -ldflags='-X github.com/CircleCI-Public/circleci-cli/telemetry.SegmentEndpoint=https://api.segment.io'
 
 build-all: build/linux/amd64/circleci build/darwin/amd64/circleci
 
@@ -18,11 +18,11 @@ clean:
 
 .PHONY: test
 test:
-	TESTING=true go test -v ./...
+	go test -v ./...
 
 .PHONY: cover
 cover:
-	TESTING=true go test -race -coverprofile=coverage.txt ./...
+	go test -race -coverprofile=coverage.txt ./...
 
 .PHONY: lint
 lint:

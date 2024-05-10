@@ -16,7 +16,7 @@ var _ = Describe("Root", func() {
 	Describe("subcommands", func() {
 		It("can create commands", func() {
 			commands := cmd.MakeCommands()
-			Expect(len(commands.Commands())).To(Equal(22))
+			Expect(len(commands.Commands())).To(Equal(25))
 		})
 	})
 
@@ -50,10 +50,7 @@ var _ = Describe("Root", func() {
 			session, err := gexec.Start(command, GinkgoWriter, GinkgoWriter)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			Eventually(session.Err.Contents()).Should(BeEmpty())
-
-			Eventually(session.Out).Should(gbytes.Say("update      This command is unavailable on your platform"))
-
+			Eventually(session.Err).Should(gbytes.Say("update\\s+This command is unavailable on your platform"))
 			Eventually(session).Should(gexec.Exit(0))
 		})
 
@@ -64,7 +61,7 @@ var _ = Describe("Root", func() {
 
 			Eventually(session.Err.Contents()).Should(BeEmpty())
 
-			Eventually(session.Out).Should(gbytes.Say("`update` is not available because this tool was installed using `homebrew`."))
+			Eventually(session.Out).Should(gbytes.Say("update is not available because this tool was installed using homebrew."))
 			Eventually(session.Out).Should(gbytes.Say("Please consult the package manager's documentation on how to update the CLI."))
 			Eventually(session).Should(gexec.Exit(0))
 		})
@@ -90,12 +87,8 @@ var _ = Describe("Root", func() {
 			session, err := gexec.Start(command, GinkgoWriter, GinkgoWriter)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			Eventually(session.Err.Contents()).Should(BeEmpty())
-
-			Eventually(session.Out).Should(gbytes.Say("update      Update the tool to the latest version"))
-
+			Eventually(session.Err).Should(gbytes.Say("update\\s+Update the tool to the latest version"))
 			Eventually(session).Should(gexec.Exit(0))
 		})
 	})
-
 })

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -17,29 +17,43 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fatih/color"
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
+	"gopkg.in/yaml.v3"
+
 	"github.com/CircleCI-Public/circleci-cli/api"
+	"github.com/CircleCI-Public/circleci-cli/api/collaborators"
+	"github.com/CircleCI-Public/circleci-cli/api/context"
 	"github.com/CircleCI-Public/circleci-cli/api/graphql"
+	"github.com/CircleCI-Public/circleci-cli/api/orb"
 	"github.com/CircleCI-Public/circleci-cli/filetree"
 	"github.com/CircleCI-Public/circleci-cli/process"
 	"github.com/CircleCI-Public/circleci-cli/prompt"
 	"github.com/CircleCI-Public/circleci-cli/references"
 	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/CircleCI-Public/circleci-cli/telemetry"
 	"github.com/CircleCI-Public/circleci-cli/version"
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"github.com/hexops/gotextdiff"
+	"github.com/hexops/gotextdiff/myers"
+	"github.com/hexops/gotextdiff/span"
 )
 
 type orbOptions struct {
-	cfg  *settings.Config
-	cl   *graphql.Client
-	args []string
+	cfg           *settings.Config
+	cl            *graphql.Client
+	args          []string
+	collaborators collaborators.CollaboratorsClient
+
+	color string
 
 	listUncertified bool
 	listJSON        bool
@@ -52,6 +66,11 @@ type orbOptions struct {
 	tty createOrbUserInterface
 	// Linked with --integration-testing flag for stubbing UI in gexec tests
 	integrationTesting bool
+}
+
+type orbOrgOptions struct {
+	OrgID   string
+	OrgSlug string
 }
 
 var orbAnnotations = map[string]string{
@@ -85,9 +104,16 @@ func (ui createOrbTestUI) askUserToConfirm(message string) bool {
 }
 
 func newOrbCommand(config *settings.Config) *cobra.Command {
+	collaborators, err := collaborators.NewCollaboratorsRestClient(*config)
+
+	if err != nil {
+		panic(err)
+	}
+
 	opts := orbOptions{
-		cfg: config,
-		tty: createOrbInteractiveUI{},
+		cfg:           config,
+		tty:           createOrbInteractiveUI{},
+		collaborators: collaborators,
 	}
 
 	listCommand := &cobra.Command{
@@ -113,13 +139,23 @@ func newOrbCommand(config *settings.Config) *cobra.Command {
 	validateCommand := &cobra.Command{
 		Use:   "validate <path>",
 		Short: "Validate an orb.yml",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return validateOrb(opts)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			orgID, _ := cmd.Flags().GetString("org-id")
+			orgSlug, _ := cmd.Flags().GetString("org-slug")
+
+			org := orbOrgOptions{
+				OrgID:   orgID,
+				OrgSlug: orgSlug,
+			}
+
+			return validateOrb(opts, org)
 		},
 		Args:        cobra.ExactArgs(1),
 		Annotations: make(map[string]string),
 	}
 	validateCommand.Annotations["<path>"] = orbAnnotations["<path>"]
+	validateCommand.Flags().String("org-slug", "", "organization slug (for example: github/example-org), used when an orb depends on private orbs belonging to that org")
+	validateCommand.Flags().String("org-id", "", "organization id used when an orb depends on private orbs belonging to that org")
 
 	processCommand := &cobra.Command{
 		Use:   "process <path>",
@@ -133,14 +169,24 @@ func newOrbCommand(config *settings.Config) *cobra.Command {
 			opts.args = args
 			opts.cl = graphql.NewClient(config.HTTPClient, config.Host, config.Endpoint, config.Token, config.Debug)
 		},
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return processOrb(opts)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			orgID, _ := cmd.Flags().GetString("org-id")
+			orgSlug, _ := cmd.Flags().GetString("org-slug")
+
+			org := orbOrgOptions{
+				OrgID:   orgID,
+				OrgSlug: orgSlug,
+			}
+
+			return processOrb(opts, org)
 		},
 		Args:        cobra.ExactArgs(1),
 		Annotations: make(map[string]string),
 	}
 	processCommand.Example = `  circleci orb process src/my-orb/@orb.yml`
 	processCommand.Annotations["<path>"] = orbAnnotations["<path>"]
+	processCommand.Flags().String("org-slug", "", "organization slug (for example: github/example-org), used when an orb depends on private orbs belonging to that org")
+	processCommand.Flags().String("org-id", "", "organization id used when an orb depends on private orbs belonging to that org")
 
 	publishCommand := &cobra.Command{
 		Use:   "publish <path> <orb>",
@@ -320,6 +366,18 @@ Please note that at this time all orbs created in the registry are world-readabl
 	}
 	orbInit.PersistentFlags().BoolVarP(&opts.private, "private", "", false, "initialize a private orb")
 
+	orbDiff := &cobra.Command{
+		Use:   "diff <orb> <version1> <version2>",
+		Short: "Shows the difference between two versions of the same orb",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return orbDiff(opts)
+		},
+		Args:        cobra.ExactArgs(3),
+		Annotations: make(map[string]string),
+	}
+	orbDiff.Annotations["<orb>"] = "An orb with only a namespace and a name. This takes this form namespace/orb"
+	orbDiff.PersistentFlags().StringVar(&opts.color, "color", "auto", "Show colored diff. Can be one of \"always\", \"never\", or \"auto\"")
+
 	orbCreate.Flags().BoolVar(&opts.integrationTesting, "integration-testing", false, "Enable test mode to bypass interactive UI.")
 	if err := orbCreate.Flags().MarkHidden("integration-testing"); err != nil {
 		panic(err)
@@ -333,6 +391,11 @@ Please note that at this time all orbs created in the registry are world-readabl
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			opts.args = args
 			opts.cl = graphql.NewClient(config.HTTPClient, config.Host, config.Endpoint, config.Token, config.Debug)
+
+			telemetryClient, ok := telemetry.FromContext(cmd.Context())
+			if ok {
+				_ = telemetryClient.Track(telemetry.CreateOrbEvent(telemetry.GetCommandInformation(cmd, true)))
+			}
 
 			// PersistentPreRunE overwrites the inherited persistent hook from rootCmd
 			// So we explicitly call it here to retain that behavior.
@@ -354,6 +417,7 @@ Please note that at this time all orbs created in the registry are world-readabl
 	orbCommand.AddCommand(removeCategorizationFromOrbCommand)
 	orbCommand.AddCommand(listCategoriesCommand)
 	orbCommand.AddCommand(orbInit)
+	orbCommand.AddCommand(orbDiff)
 
 	return orbCommand
 }
@@ -369,6 +433,22 @@ func orbHelpLong(config *settings.Config) string {
 See a full explanation and documentation on orbs here: %s`, config.Data.Links.OrbDocs)
 }
 
+// Transform a boolean parameter into a string. Because the value can be a boolean but can also be
+// a string, we need to first parse it as a boolean and then if it is not a boolean, parse it as
+// a string
+//
+// Documentation reference: https://circleci.com/docs/reusing-config/#boolean
+func booleanParameterDefaultToString(parameter api.OrbElementParameter) string {
+	if v, ok := parameter.Default.(bool); ok {
+		return fmt.Sprintf("%t", v)
+	}
+	v, ok := parameter.Default.(string)
+	if !ok {
+		log.Panicf("Unable to parse boolean parameter with value %+v", v)
+	}
+	return v
+}
+
 func parameterDefaultToString(parameter api.OrbElementParameter) string {
 	defaultValue := " (default: '"
 
@@ -380,12 +460,18 @@ func parameterDefaultToString(parameter api.OrbElementParameter) string {
 	}
 
 	switch parameter.Type {
-	case "enum":
-		defaultValue += parameter.Default.(string)
-	case "string":
-		defaultValue += parameter.Default.(string)
+	case "enum", "string":
+		if v, ok := parameter.Default.(string); ok {
+			defaultValue += v
+			break
+		}
+		if v, ok := parameter.Default.(fmt.Stringer); ok {
+			defaultValue += v.String()
+			break
+		}
+		log.Panicf("Unable to parse parameter default with value %+v because it's neither a string nor a stringer", parameter.Default)
 	case "boolean":
-		defaultValue += fmt.Sprintf("%t", parameter.Default.(bool))
+		defaultValue += booleanParameterDefaultToString(parameter)
 	default:
 		defaultValue += ""
 	}
@@ -648,8 +734,18 @@ func listNamespaceOrbs(opts orbOptions) error {
 	return logOrbs(*orbs, opts)
 }
 
-func validateOrb(opts orbOptions) error {
-	_, err := api.OrbQuery(opts.cl, opts.args[0])
+func validateOrb(opts orbOptions, org orbOrgOptions) error {
+	orgId, err := (&opts).getOrgId(org)
+
+	if err != nil {
+		return fmt.Errorf("failed to get the appropriate org-id: %s", err.Error())
+	}
+
+	client, err := orb.NewClient(opts.cfg)
+	if err != nil {
+		return errors.Wrap(err, "Getting orb client")
+	}
+	_, err = client.OrbQuery(opts.args[0], orgId)
 
 	if err != nil {
 		return err
@@ -664,8 +760,18 @@ func validateOrb(opts orbOptions) error {
 	return nil
 }
 
-func processOrb(opts orbOptions) error {
-	response, err := api.OrbQuery(opts.cl, opts.args[0])
+func processOrb(opts orbOptions, org orbOrgOptions) error {
+	orgId, err := (&opts).getOrgId(org)
+
+	if err != nil {
+		return fmt.Errorf("failed to get the appropriate org-id: %s", err.Error())
+	}
+
+	client, err := orb.NewClient(opts.cfg)
+	if err != nil {
+		return errors.Wrap(err, "Getting orb client")
+	}
+	response, err := client.OrbQuery(opts.args[0], orgId)
 
 	if err != nil {
 		return err
@@ -676,6 +782,7 @@ func processOrb(opts orbOptions) error {
 }
 
 func publishOrb(opts orbOptions) error {
+	orbInformThatOrbCannotBeDeletedMessage()
 	path := opts.args[0]
 	ref := opts.args[1]
 	namespace, orb, version, err := references.SplitIntoOrbNamespaceAndVersion(ref)
@@ -751,6 +858,8 @@ func validateSegmentArg(label string) error {
 }
 
 func incrementOrb(opts orbOptions) error {
+	orbInformThatOrbCannotBeDeletedMessage()
+
 	ref := opts.args[1]
 	segment := opts.args[2]
 
@@ -779,6 +888,8 @@ func incrementOrb(opts orbOptions) error {
 }
 
 func promoteOrb(opts orbOptions) error {
+	orbInformThatOrbCannotBeDeletedMessage()
+
 	ref := opts.args[0]
 	segment := opts.args[1]
 
@@ -827,6 +938,16 @@ If you change your mind about the name, you will have to create a new orb with t
 `, namespace, orbName)
 	}
 
+	if opts.private {
+		fmt.Printf(`This orb will not be listed on the registry and is usable only by org users.
+
+`)
+	} else {
+		fmt.Printf(`Please note that any versions you publish of this orb will be world readable unless you create it with the '--private' flag
+
+`)
+	}
+
 	confirm := fmt.Sprintf("Are you sure you wish to create the orb: `%s/%s`", namespace, orbName)
 
 	if opts.noPrompt || opts.tty.askUserToConfirm(confirm) {
@@ -836,13 +957,7 @@ If you change your mind about the name, you will have to create a new orb with t
 			return err
 		}
 
-		confirmationString := "Please note that any versions you publish of this orb are world-readable."
-		if opts.private {
-			confirmationString = "This orb will not be listed on the registry and is usable only by org users."
-		}
-
 		fmt.Printf("Orb `%s` created.\n", opts.args[0])
-		fmt.Println(confirmationString)
 		fmt.Printf("You can now register versions of `%s` using `circleci orb publish`.\n", opts.args[0])
 	}
 
@@ -961,6 +1076,7 @@ type OrbSchema struct {
 
 type ExampleUsageSchema struct {
 	Version   string      `yaml:"version,omitempty"`
+	Setup     bool        `yaml:"setup,omitempty"`
 	Orbs      interface{} `yaml:"orbs,omitempty"`
 	Jobs      interface{} `yaml:"jobs,omitempty"`
 	Workflows interface{} `yaml:"workflows"`
@@ -1055,7 +1171,24 @@ func inlineIncludes(node *yaml.Node, orbRoot string) error {
 func initOrb(opts orbOptions) error {
 	orbPath := opts.args[0]
 	var err error
-	fmt.Println("Note: This command is in preview. Please report any bugs! https://github.com/CircleCI-Public/circleci-cli/issues/new/choose")
+
+	if !opts.private {
+		prompt := &survey.Select{
+			Message: "Would you like to create a public or private orb?",
+			Options: []string{"Public", "Private"},
+		}
+		var selectedOption string
+		err := survey.AskOne(prompt, &selectedOption)
+		if err != nil {
+			return errors.Wrap(err, "Unexpected error")
+		}
+
+		if selectedOption == "Private" {
+			opts.private = true
+		}
+	}
+
+	orbInformThatOrbCannotBeDeletedMessage()
 
 	fullyAutomated := 0
 	prompt := &survey.Select{
@@ -1074,7 +1207,7 @@ func initOrb(opts orbOptions) error {
 		return errors.Wrap(err, "Unexpected error")
 	}
 
-	body, err := ioutil.ReadAll(req.Body)
+	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return errors.Wrap(err, "Unexpected error")
 	}
@@ -1102,7 +1235,8 @@ func initOrb(opts orbOptions) error {
 	defer resp.Body.Close()
 
 	// Create the file
-	out, err := os.Create(filepath.Join(os.TempDir(), "orb-template.zip"))
+	zipPath := filepath.Join(os.TempDir(), "orb-template.zip")
+	out, err := os.Create(zipPath)
 	if err != nil {
 		return err
 	}
@@ -1114,9 +1248,17 @@ func initOrb(opts orbOptions) error {
 		return err
 	}
 
-	err = unzipToOrbPath(filepath.Join(os.TempDir(), "orb-template.zip"), orbPath)
+	err = unzipToOrbPath(zipPath, orbPath)
 	if err != nil {
 		return err
+	}
+
+	// Remove MIT License file if orb is private
+	if opts.private {
+		err = os.Remove(filepath.Join(orbPath, "LICENSE"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 
 	if fullyAutomated == 1 {
@@ -1146,8 +1288,8 @@ func initOrb(opts orbOptions) error {
 	if !useDefaultVcs {
 		vcsSelect := "github"
 		prompt = &survey.Select{
-			Message: "Are you using GitHub or Bitbucket?",
-			Options: []string{"GitHub", "Bitbucket"},
+			Message: "Are you using GitHub or Bitbucket or GitHub app (if GH App use circleci as the entry)?",
+			Options: []string{"GitHub", "Bitbucket", "circleci"},
 		}
 		err = survey.AskOne(prompt, &vcsSelect)
 		if err != nil {
@@ -1160,6 +1302,12 @@ func initOrb(opts orbOptions) error {
 	iprompt := &survey.Input{
 		Message: fmt.Sprintf("Enter your %s username or organization", vcsProvider),
 		Default: opts.cfg.OrbPublishing.DefaultOwner,
+	}
+	if vcsProvider == "GitHub" {
+		iprompt = &survey.Input{
+			Message: fmt.Sprintf("If your organization is using CircleCI’s GitHub App integration (see %s to check), enter your organization ID found in Organization Settings. If not, enter your organization name as a string.",
+				"https://circleci.com/docs/github-apps-integration/"),
+		}
 	}
 	err = survey.AskOne(iprompt, &ownerName)
 	if err != nil {
@@ -1196,9 +1344,28 @@ func initOrb(opts orbOptions) error {
 		Message: "Orb name",
 		Default: orbName,
 	}
+
+	orbExists := true
+
 	err = survey.AskOne(iprompt, &orbName)
 	if err != nil {
 		return errors.Wrap(err, "Unexpected error")
+	}
+
+	_, err = api.OrbInfo(opts.cl, namespace+"/"+orbName)
+	if err != nil {
+		orbExists = false
+	}
+
+	if orbExists {
+		mprompt := &survey.Confirm{
+			Message: fmt.Sprintf("Orb %s/%s already exists, would you like to continue?", namespace, orbName),
+		}
+		confirmation := false
+		err = survey.AskOne(mprompt, &confirmation)
+		if err != nil {
+			return errors.Wrap(err, "Orb already exists")
+		}
 	}
 
 	registryCategories, err := api.ListOrbCategories(opts.cl)
@@ -1235,8 +1402,8 @@ func initOrb(opts orbOptions) error {
 	}
 
 	if createContext == 0 {
-		contextGql := api.NewContextGraphqlClient(opts.cfg.HTTPClient, opts.cfg.Host, opts.cfg.Endpoint, opts.cfg.Token, opts.cfg.Debug)
-		err = contextGql.CreateContext(vcsProvider, ownerName, "orb-publishing")
+		contextAPI := context.NewContextClient(opts.cfg, "", vcsProvider, ownerName)
+		err = contextAPI.CreateContext("orb-publishing")
 		if err != nil {
 			if strings.Contains(err.Error(), "A context named orb-publishing already exists") {
 				fmt.Println("`orb-publishing` context already exists, continuing on")
@@ -1244,11 +1411,11 @@ func initOrb(opts orbOptions) error {
 				return err
 			}
 		}
-		ctx, err := contextGql.ContextByName(vcsProvider, ownerName, "orb-publishing")
+		ctx, err := contextAPI.ContextByName("orb-publishing")
 		if err != nil {
 			return err
 		}
-		err = contextGql.CreateEnvironmentVariable(ctx.ID, "CIRCLE_TOKEN", opts.cfg.Token)
+		err = contextAPI.CreateEnvironmentVariable(ctx.ID, "CIRCLE_TOKEN", opts.cfg.Token)
 		if err != nil && !strings.Contains(err.Error(), "ALREADY_EXISTS") {
 			return err
 		}
@@ -1273,9 +1440,11 @@ func initOrb(opts orbOptions) error {
 	}()
 
 	if !gitAction {
-		_, err = api.CreateOrb(opts.cl, namespace, orbName, opts.private)
-		if err != nil {
-			return errors.Wrap(err, "Unable to create orb")
+		if !orbExists {
+			_, err = api.CreateOrb(opts.cl, namespace, orbName, opts.private)
+			if err != nil {
+				return errors.Wrap(err, "Unable to create orb")
+			}
 		}
 		for _, v := range categories {
 			err = api.AddOrRemoveOrbCategorization(opts.cl, namespace, orbName, v, api.Add)
@@ -1316,51 +1485,54 @@ func initOrb(opts orbOptions) error {
 		return y[0]
 	}()
 
-	circleConfigSetup, err := ioutil.ReadFile(path.Join(orbPath, ".circleci", "config.yml"))
+	circleConfigSetup, err := os.ReadFile(path.Join(orbPath, ".circleci", "config.yml"))
 	if err != nil {
 		return err
 	}
 
 	configSetupString := string(circleConfigSetup)
-	err = ioutil.WriteFile(path.Join(orbPath, ".circleci", "config.yml"), []byte(orbTemplate(configSetupString, projectName, ownerName, orbName, namespace)), 0644)
+	err = os.WriteFile(path.Join(orbPath, ".circleci", "config.yml"), []byte(orbTemplate(configSetupString, projectName, ownerName, orbName, namespace)), 0644)
 	if err != nil {
 		return err
 	}
 
-	circleConfigDeploy, err := ioutil.ReadFile(path.Join(orbPath, ".circleci", "test-deploy.yml"))
+	circleConfigDeploy, err := os.ReadFile(path.Join(orbPath, ".circleci", "test-deploy.yml"))
 	if err != nil {
 		return err
 	}
 
 	configDeployString := string(circleConfigDeploy)
-	err = ioutil.WriteFile(path.Join(orbPath, ".circleci", "test-deploy.yml"), []byte(orbTemplate(configDeployString, projectName, ownerName, orbName, namespace)), 0644)
+	err = os.WriteFile(path.Join(orbPath, ".circleci", "test-deploy.yml"), []byte(orbTemplate(configDeployString, projectName, ownerName, orbName, namespace)), 0644)
 	if err != nil {
 		return err
 	}
 
-	readme, err := ioutil.ReadFile(path.Join(orbPath, "README.md"))
+	readme, err := os.ReadFile(path.Join(orbPath, "README.md"))
 	if err != nil {
 		return err
 	}
 
 	readmeString := string(readme)
-	err = ioutil.WriteFile(path.Join(orbPath, "README.md"), []byte(orbTemplate(readmeString, projectName, ownerName, orbName, namespace)), 0644)
+	err = os.WriteFile(path.Join(orbPath, "README.md"), []byte(orbTemplate(readmeString, projectName, ownerName, orbName, namespace)), 0644)
 	if err != nil {
 		return err
 	}
 
-	orbRoot, err := ioutil.ReadFile(path.Join(orbPath, "src", "@orb.yml"))
+	orbRoot, err := os.ReadFile(path.Join(orbPath, "src", "@orb.yml"))
 	if err != nil {
 		return err
 	}
 
 	orbRootString := string(orbRoot)
-	err = ioutil.WriteFile(path.Join(orbPath, "src", "@orb.yml"), []byte(orbTemplate(orbRootString, projectName, ownerName, orbName, namespace)), 0644)
+	err = os.WriteFile(path.Join(orbPath, "src", "@orb.yml"), []byte(orbTemplate(orbRootString, projectName, ownerName, orbName, namespace)), 0644)
 	if err != nil {
 		return err
 	}
 
 	r, err := git.PlainInit(orbPath, false)
+	if errors.Is(err, git.ErrRepositoryAlreadyExists) {
+		return errors.New("the folder is already a repository because it has .git folder. Try deleting it and retrying")
+	}
 	if err != nil {
 		return err
 	}
@@ -1410,9 +1582,11 @@ func initOrb(opts orbOptions) error {
 	}
 
 	// Push a dev version of the orb.
-	_, err = api.CreateOrb(opts.cl, namespace, orbName, opts.private)
-	if err != nil {
-		return errors.Wrap(err, "Unable to create orb")
+	if !orbExists {
+		_, err = api.CreateOrb(opts.cl, namespace, orbName, opts.private)
+		if err != nil {
+			return errors.Wrap(err, "Unable to create orb")
+		}
 	}
 	for _, v := range categories {
 		err = api.AddOrRemoveOrbCategorization(opts.cl, namespace, orbName, v, api.Add)
@@ -1433,7 +1607,7 @@ func initOrb(opts orbOptions) error {
 	}
 
 	tempOrbFile := filepath.Join(tempOrbDir, "orb.yml")
-	err = ioutil.WriteFile(tempOrbFile, []byte(packedOrb), 0644)
+	err = os.WriteFile(tempOrbFile, []byte(packedOrb), 0644)
 	if err != nil {
 		return errors.Wrap(err, "Unable to write packed orb")
 	}
@@ -1585,4 +1759,113 @@ func orbTemplate(fileContents string, projectName string, orgName string, orbNam
 	x = re.ReplaceAllString(x, "")
 
 	return x
+}
+
+func orbDiff(opts orbOptions) error {
+	colorOpt := opts.color
+	allowedColorOpts := []string{"auto", "always", "never"}
+	if !slices.Contains(allowedColorOpts, colorOpt) {
+		return fmt.Errorf("option `color' expects \"always\", \"auto\", or \"never\"")
+	}
+
+	orbName := opts.args[0]
+	version1 := opts.args[1]
+	version2 := opts.args[2]
+	orb1 := fmt.Sprintf("%s@%s", orbName, version1)
+	orb2 := fmt.Sprintf("%s@%s", orbName, version2)
+
+	orb1Source, err := api.OrbSource(opts.cl, orb1)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get source for '%s'", orb1)
+	}
+	orb2Source, err := api.OrbSource(opts.cl, orb2)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get source for '%s'", orb2)
+	}
+
+	edits := myers.ComputeEdits(span.URIFromPath(orb1), orb1Source, orb2Source)
+	unified := gotextdiff.ToUnified(orb1, orb2, orb1Source, edits)
+	diff := stringifyDiff(unified, colorOpt)
+	if diff == "" {
+		fmt.Println("No diff found")
+	} else {
+		fmt.Println(diff)
+	}
+
+	return nil
+}
+
+// Stringifies the unified diff passed as argument, and colorize it depending on the colorOpt value
+func stringifyDiff(diff gotextdiff.Unified, colorOpt string) string {
+	if len(diff.Hunks) == 0 {
+		return ""
+	}
+
+	headerColor := color.New(color.BgYellow, color.FgBlack)
+	diffStartColor := color.New(color.BgBlue, color.FgWhite)
+	deleteColor := color.New(color.FgRed)
+	insertColor := color.New(color.FgGreen)
+	untouchedColor := color.New(color.Reset)
+
+	// The color library already takes care of disabling the color when stdout is redirected so we
+	// just enforce the color behavior for "never" and "always" and let the library handle the 'auto'
+	// case
+	oldNoColor := color.NoColor
+	if colorOpt == "never" {
+		color.NoColor = true
+	}
+	if colorOpt == "always" {
+		color.NoColor = false
+	}
+
+	diffString := fmt.Sprintf("%s", diff)
+	lines := strings.Split(diffString, "\n")
+
+	for i, line := range lines {
+		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+			lines[i] = headerColor.Sprint(line)
+		} else if strings.HasPrefix(line, "@@ ") {
+			lines[i] = diffStartColor.Sprint(line)
+		} else if strings.HasPrefix(line, "-") {
+			lines[i] = deleteColor.Sprint(line)
+		} else if strings.HasPrefix(line, "+") {
+			lines[i] = insertColor.Sprint(line)
+		} else {
+			lines[i] = untouchedColor.Sprint(line)
+		}
+	}
+
+	color.NoColor = oldNoColor
+	return strings.Join(lines, "\n")
+}
+
+func orbInformThatOrbCannotBeDeletedMessage() {
+	fmt.Println("Once an orb is created it cannot be deleted. Orbs are semver compliant, and each published version is immutable. Publicly released orbs are potential dependencies for other projects.")
+	fmt.Println("Therefore, allowing orb deletion would make users susceptible to unexpected loss of functionality.")
+}
+
+func (o *orbOptions) getOrgId(orgInfo orbOrgOptions) (string, error) {
+	if strings.TrimSpace(orgInfo.OrgID) != "" {
+		return orgInfo.OrgID, nil
+	}
+
+	if strings.TrimSpace(orgInfo.OrgSlug) == "" {
+		return "", nil
+	}
+
+	coll, err := o.collaborators.GetCollaborationBySlug(orgInfo.OrgSlug)
+
+	if err != nil {
+		return "", err
+	}
+
+	if coll == nil {
+		fmt.Println("Could not fetch a valid org-id from collaborators endpoint.")
+		fmt.Println("Check if you have access to this org by hitting https://circleci.com/api/v2/me/collaborations")
+		fmt.Println("Continuing on - private orb resolution will not work as intended")
+
+		return "", nil
+	}
+
+	return coll.OrgId, nil
 }

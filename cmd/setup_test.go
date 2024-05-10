@@ -2,18 +2,50 @@ package cmd_test
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
 
 	"github.com/CircleCI-Public/circleci-cli/clitest"
+	"github.com/CircleCI-Public/circleci-cli/telemetry"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
 )
+
+var _ = Describe("Setup telemetry", func() {
+	var (
+		command      *exec.Cmd
+		tempSettings *clitest.TempSettings
+	)
+
+	BeforeEach(func() {
+		tempSettings = clitest.WithTempSettings()
+		command = commandWithHome(pathCLI, tempSettings.Home,
+			"setup",
+			"--integration-testing",
+			"--skip-update-check",
+		)
+		command.Env = append(command.Env, fmt.Sprintf("MOCK_TELEMETRY=%s", tempSettings.TelemetryDestPath))
+	})
+
+	AfterEach(func() {
+		tempSettings.Close()
+	})
+
+	It("should send telemetry event", func() {
+		session, err := gexec.Start(command, GinkgoWriter, GinkgoWriter)
+		Expect(err).ShouldNot(HaveOccurred())
+
+		Eventually(session).Should(gexec.Exit(0))
+		clitest.CompareTelemetryEvent(tempSettings, []telemetry.Event{
+			telemetry.CreateSetupEvent(true),
+		})
+	})
+})
 
 var _ = Describe("Setup with prompts", func() {
 	var (
@@ -236,7 +268,7 @@ token: asdf
 				)
 			})
 
-			It("write the configuration to a file", func() {
+			It("writes the configuration to a file", func() {
 				session, err := gexec.Start(command, GinkgoWriter, GinkgoWriter)
 				Expect(err).ShouldNot(HaveOccurred())
 				stdout := session.Wait().Out.Contents()
@@ -248,7 +280,7 @@ Your configuration has been saved to %s.
 					file, err := os.Open(tempSettings.Config.Path)
 					Expect(err).ShouldNot(HaveOccurred())
 
-					reread, err := ioutil.ReadAll(file)
+					reread, err := io.ReadAll(file)
 					Expect(err).ShouldNot(HaveOccurred())
 					Expect(string(reread)).To(Equal(`host: https://zomg.com
 endpoint: graphql-unstable

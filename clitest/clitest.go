@@ -5,16 +5,17 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 
 	"github.com/CircleCI-Public/circleci-cli/api/graphql"
+	"github.com/CircleCI-Public/circleci-cli/settings"
 	"github.com/onsi/gomega/gexec"
 	"github.com/onsi/gomega/ghttp"
 	"github.com/onsi/gomega/types"
+	"gopkg.in/yaml.v3"
 
 	"github.com/onsi/gomega"
 )
@@ -31,10 +32,12 @@ func ShouldFail() types.GomegaMatcher {
 
 // TempSettings contains useful settings for testing the CLI
 type TempSettings struct {
-	Home       string
-	TestServer *ghttp.Server
-	Config     *TmpFile
-	Update     *TmpFile
+	Home              string
+	TestServer        *ghttp.Server
+	Config            *TmpFile
+	Update            *TmpFile
+	Telemetry         *TmpFile
+	TelemetryDestPath string
 }
 
 // Close should be called in an AfterEach and cleans up the temp directory and server process
@@ -50,7 +53,7 @@ func (tempSettings TempSettings) AssertConfigRereadMatches(contents string) {
 	file, err := os.Open(tempSettings.Config.Path)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-	reread, err := ioutil.ReadAll(file)
+	reread, err := io.ReadAll(file)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Expect(string(reread)).To(gomega.ContainSubstring(contents))
 }
@@ -61,7 +64,7 @@ func WithTempSettings() *TempSettings {
 
 	tempSettings := &TempSettings{}
 
-	tempSettings.Home, err = ioutil.TempDir("", "circleci-cli-test-")
+	tempSettings.Home, err = os.MkdirTemp("", "circleci-cli-test-")
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 	settingsPath := filepath.Join(tempSettings.Home, ".circleci")
@@ -69,6 +72,16 @@ func WithTempSettings() *TempSettings {
 	gomega.Expect(os.Mkdir(settingsPath, 0700)).To(gomega.Succeed())
 
 	tempSettings.Config = OpenTmpFile(settingsPath, "cli.yml")
+	tempSettings.Telemetry = OpenTmpFile(settingsPath, "telemetry.yml")
+	content, err := yaml.Marshal(settings.TelemetrySettings{
+		IsEnabled:         false,
+		HasAnsweredPrompt: true,
+	})
+	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	_, err = tempSettings.Telemetry.File.Write(content)
+	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	tempSettings.TelemetryDestPath = filepath.Join(tempSettings.Home, "telemetry-content")
+
 	tempSettings.Update = OpenTmpFile(settingsPath, "update_check.yml")
 
 	tempSettings.TestServer = ghttp.NewServer()
@@ -89,30 +102,6 @@ type MockRequestResponse struct {
 	ErrorResponse string
 }
 
-func (tempSettings *TempSettings) AppendRESTPostHandler(combineHandlers ...MockRequestResponse) {
-	for _, handler := range combineHandlers {
-		responseBody := handler.Response
-		if handler.ErrorResponse != "" {
-			responseBody = handler.ErrorResponse
-		}
-
-		tempSettings.TestServer.AppendHandlers(
-			ghttp.CombineHandlers(
-				ghttp.VerifyRequest("POST", "/api/v2/context"),
-				ghttp.VerifyContentType("application/json"),
-				func(w http.ResponseWriter, req *http.Request) {
-					body, err := ioutil.ReadAll(req.Body)
-					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-					err = req.Body.Close()
-					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-					gomega.Expect(handler.Request).Should(gomega.MatchJSON(body), "JSON Mismatch")
-				},
-				ghttp.RespondWith(handler.Status, responseBody),
-			),
-		)
-	}
-}
-
 // AppendPostHandler stubs out the provided MockRequestResponse.
 // When authToken is an empty string no token validation is performed.
 func (tempSettings *TempSettings) AppendPostHandler(authToken string, combineHandlers ...MockRequestResponse) {
@@ -131,7 +120,7 @@ func (tempSettings *TempSettings) AppendPostHandler(authToken string, combineHan
 					// VerifyContentType("application/json") check
 					// that fails with "application/json; charset=utf-8"
 					func(w http.ResponseWriter, req *http.Request) {
-						body, err := ioutil.ReadAll(req.Body)
+						body, err := io.ReadAll(req.Body)
 						gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 						err = req.Body.Close()
 						gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -152,7 +141,7 @@ func (tempSettings *TempSettings) AppendPostHandler(authToken string, combineHan
 					// VerifyContentType("application/json") check
 					// that fails with "application/json; charset=utf-8"
 					func(w http.ResponseWriter, req *http.Request) {
-						body, err := ioutil.ReadAll(req.Body)
+						body, err := io.ReadAll(req.Body)
 						gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 						err = req.Body.Close()
 						gomega.Expect(err).ShouldNot(gomega.HaveOccurred())

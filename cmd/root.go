@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,19 +10,24 @@ import (
 	"github.com/CircleCI-Public/circleci-cli/api/header"
 	"github.com/CircleCI-Public/circleci-cli/cmd/info"
 	"github.com/CircleCI-Public/circleci-cli/cmd/policy"
+	"github.com/CircleCI-Public/circleci-cli/cmd/project"
 	"github.com/CircleCI-Public/circleci-cli/cmd/runner"
 	"github.com/CircleCI-Public/circleci-cli/data"
 	"github.com/CircleCI-Public/circleci-cli/md_docs"
 	"github.com/CircleCI-Public/circleci-cli/settings"
+	"github.com/CircleCI-Public/circleci-cli/telemetry"
 	"github.com/CircleCI-Public/circleci-cli/version"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
-var defaultEndpoint = "graphql-unstable"
-var defaultHost = "https://circleci.com"
-var defaultRestEndpoint = "api/v2"
-var trueString = "true"
+var (
+	defaultEndpoint     = "graphql-unstable"
+	defaultHost         = "https://circleci.com"
+	defaultRestEndpoint = "api/v2"
+	trueString          = "true"
+)
 
 // rootCmd is used internally and global to the package but not exported
 // therefore we can use it in other commands, like `usage`
@@ -34,16 +40,23 @@ var rootOptions *settings.Config
 // rootTokenFromFlag stores the value passed in through the flag --token
 var rootTokenFromFlag string
 
-// Execute adds all child commands to rootCmd and
-// sets flags appropriately. This function is called
-// by main.main(). It only needs to happen once to
-// the rootCmd.
-func Execute() {
+// Execute adds all child commands to rootCmd, sets the flags appropriately
+// and put the telemetry client in the command context. This function is
+// called by main.main(). It only needs to happen once to the rootCmd
+func Execute() error {
 	header.SetCommandStr(CommandStr())
 	command := MakeCommands()
-	if err := command.Execute(); err != nil {
-		os.Exit(-1)
+
+	telemetryClient := CreateTelemetry(rootOptions)
+	defer telemetryClient.Close()
+
+	cmdContext := command.Context()
+	if cmdContext == nil {
+		cmdContext = context.Background()
 	}
+	command.SetContext(telemetry.NewContext(cmdContext, telemetryClient))
+
+	return command.Execute()
 }
 
 // Returns a string (e.g. "circleci context list") indicating what
@@ -110,11 +123,18 @@ func MakeCommands() *cobra.Command {
 
 	rootOptions.Data = &data.Data
 
+	helpWidth := getHelpWidth()
+	// CircleCI Logo will only appear with enough window width
+	longHelp := ""
+	if helpWidth > 85 {
+		longHelp = rootHelpLong()
+	}
+
 	rootCmd = &cobra.Command{
 		Use:   "circleci",
-		Long:  rootHelpLong(),
+		Long:  longHelp,
 		Short: rootHelpShort(rootOptions),
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			return rootCmdPreRun(rootOptions)
 		},
 	}
@@ -124,10 +144,8 @@ func MakeCommands() *cobra.Command {
 	cobra.AddTemplateFunc("PositionalArgs", md_docs.PositionalArgs)
 	cobra.AddTemplateFunc("FormatPositionalArg", md_docs.FormatPositionalArg)
 
-	if os.Getenv("TESTING") != trueString {
-		helpCmd := helpCmd{cmd: rootCmd}
-		rootCmd.SetHelpFunc(helpCmd.helpTemplate)
-	}
+	helpCmd := helpCmd{width: helpWidth}
+	rootCmd.SetHelpFunc(helpCmd.helpTemplate)
 	rootCmd.SetUsageTemplate(usageTemplate)
 	rootCmd.DisableAutoGenTag = true
 
@@ -135,9 +153,10 @@ func MakeCommands() *cobra.Command {
 		return validateToken(rootOptions)
 	}
 
-	rootCmd.AddCommand(newOpenCommand())
+	rootCmd.AddCommand(newOpenCommand(rootOptions))
 	rootCmd.AddCommand(newTestsCommand())
 	rootCmd.AddCommand(newContextCommand(rootOptions))
+	rootCmd.AddCommand(project.NewProjectCommand(rootOptions, validator))
 	rootCmd.AddCommand(newQueryCommand(rootOptions))
 	rootCmd.AddCommand(newConfigCommand(rootOptions))
 	rootCmd.AddCommand(newOrbCommand(rootOptions))
@@ -163,7 +182,9 @@ func MakeCommands() *cobra.Command {
 	rootCmd.AddCommand(newStepCommand(rootOptions))
 	rootCmd.AddCommand(newSwitchCommand(rootOptions))
 	rootCmd.AddCommand(newAdminCommand(rootOptions))
-	rootCmd.AddCommand(newCompletionCommand())
+	rootCmd.AddCommand(newCompletionCommand(rootOptions))
+	rootCmd.AddCommand(newEnvCmd())
+	rootCmd.AddCommand(newTelemetryCommand(rootOptions))
 
 	flags := rootCmd.PersistentFlags()
 
@@ -173,8 +194,9 @@ func MakeCommands() *cobra.Command {
 	flags.StringVar(&rootOptions.Endpoint, "endpoint", rootOptions.Endpoint, "URI to your CircleCI GraphQL API endpoint")
 	flags.StringVar(&rootOptions.GitHubAPI, "github-api", "https://api.github.com/", "Change the default endpoint to GitHub API for retrieving updates")
 	flags.BoolVar(&rootOptions.SkipUpdateCheck, "skip-update-check", skipUpdateByDefault(), "Skip the check for updates check run before every command.")
+	flags.StringVar(&rootOptions.MockTelemetry, "mock-telemetry", "", "The path where telemetry must be written")
 
-	hidden := []string{"github-api", "debug", "endpoint"}
+	hidden := []string{"github-api", "debug", "endpoint", "mock-telemetry"}
 
 	for _, f := range hidden {
 		if err := flags.MarkHidden(f); err != nil {
@@ -216,6 +238,7 @@ func rootCmdPreRun(rootOptions *settings.Config) error {
 		fmt.Printf("Error checking for updates: %s\n", err)
 		fmt.Printf("Please contact support.\n\n")
 	}
+
 	return nil
 }
 
@@ -323,12 +346,11 @@ For more help, see the documentation here: %s`, short, config.Data.Links.CLIDocs
 }
 
 type helpCmd struct {
-	cmd *cobra.Command
+	width int
 }
 
-// helpTemplate Building a custom help template with more finess and pizazz
+// helpTemplate Building a custom help template with more finesse and pizazz
 func (helpCmd *helpCmd) helpTemplate(cmd *cobra.Command, s []string) {
-
 	/***Styles ***/
 	titleStyle := lipgloss.NewStyle().Bold(true).
 		Foreground(lipgloss.AdaptiveColor{Light: `#003740`, Dark: `#3B6385`}).
@@ -346,14 +368,14 @@ func (helpCmd *helpCmd) helpTemplate(cmd *cobra.Command, s []string) {
 	/** Building Usage String **/
 	usageText := strings.Builder{}
 
-	//get command path
+	// get command path
 	usageText.WriteString(titleStyle.Render(cmd.CommandPath()))
 
-	//get command short or long
+	// get command short or long
 	cmdDesc := titleStyle.Render(cmd.Long)
 	if strings.TrimSpace(cmdDesc) == "" || cmd.Name() == "circleci" {
 		if cmd.Name() == "circleci" {
-			cmdDesc += "\n\n" //add some spaces for circleci command
+			cmdDesc += "\n\n" // add some spaces for circleci command
 		}
 		cmdDesc += subCmdStyle.Render(cmd.Short)
 	}
@@ -401,12 +423,24 @@ func (helpCmd *helpCmd) helpTemplate(cmd *cobra.Command, s []string) {
 		usageText.WriteString(flags)
 	}
 
-	//Border styles
+	// Border styles
 	borderStyle := lipgloss.NewStyle().
 		Padding(0, 1, 0, 1).
-		Width(120).
+		Width(helpCmd.width - 2).
 		BorderForeground(lipgloss.AdaptiveColor{Light: `#3B6385`, Dark: `#47A359`}).
 		Border(lipgloss.ThickBorder())
 
 	log.Println("\n" + borderStyle.Render(usageText.String()+"\n"))
+}
+
+func getHelpWidth() int {
+	const defaultHelpWidth = 122
+	if !term.IsTerminal(0) {
+		return defaultHelpWidth
+	}
+	w, _, err := term.GetSize(0)
+	if err == nil && w < defaultHelpWidth {
+		return w
+	}
+	return defaultHelpWidth
 }

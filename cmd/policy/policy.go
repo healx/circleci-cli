@@ -3,32 +3,50 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/CircleCI-Public/circle-policy-agent/cpa"
+	"github.com/CircleCI-Public/circle-policy-agent/cpa/tester"
+
 	"github.com/araddon/dateparse"
 	"github.com/briandowns/spinner"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
 	"github.com/CircleCI-Public/circleci-cli/api/policy"
+	"github.com/CircleCI-Public/circleci-cli/api/rest"
 	"github.com/CircleCI-Public/circleci-cli/cmd/validator"
+	"github.com/CircleCI-Public/circleci-cli/config"
+	"github.com/CircleCI-Public/circleci-cli/telemetry"
 
 	"github.com/CircleCI-Public/circleci-cli/settings"
 )
 
 // NewCommand creates the root policy command with all policy subcommands attached.
-func NewCommand(config *settings.Config, preRunE validator.Validator) *cobra.Command {
+func NewCommand(globalConfig *settings.Config, preRunE validator.Validator) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "policy",
-		PersistentPreRunE: preRunE,
-		Short:             "Manage security policies",
+		Use: "policy",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			telemetryClient, ok := telemetry.FromContext(cmd.Context())
+			if ok {
+				_ = telemetryClient.Track(telemetry.CreatePolicyEvent(telemetry.GetCommandInformation(cmd, true)))
+			}
+
+			if preRunE != nil {
+				return preRunE(cmd, args)
+			}
+			return nil
+		},
+		Short: "Manage security policies",
 		Long: `Policies ensures security of build configs via security policy management framework.
 This group of commands allows the management of polices to be verified against build configs.`,
 	}
@@ -51,7 +69,7 @@ This group of commands allows the management of polices to be verified against b
 
 				request.Policies = bundle
 
-				client := policy.NewClient(*policyBaseURL, config)
+				client := policy.NewClient(*policyBaseURL, globalConfig)
 
 				if !noPrompt {
 					request.DryRun = true
@@ -88,7 +106,7 @@ This group of commands allows the management of polices to be verified against b
 				return nil
 			},
 			Args:    cobra.ExactArgs(1),
-			Example: `policy push ./policies --owner-id 462d67f8-b232-4da4-a7de-0c86dd667d3f`,
+			Example: `circleci policy push ./policies --owner-id 462d67f8-b232-4da4-a7de-0c86dd667d3f`,
 		}
 
 		cmd.Flags().StringVar(&context, "context", "config", "policy context")
@@ -112,7 +130,7 @@ This group of commands allows the management of polices to be verified against b
 					return fmt.Errorf("failed to walk policy directory path: %w", err)
 				}
 
-				diff, err := policy.NewClient(*policyBaseURL, config).CreatePolicyBundle(ownerID, context, policy.CreatePolicyBundleRequest{
+				diff, err := policy.NewClient(*policyBaseURL, globalConfig).CreatePolicyBundle(ownerID, context, policy.CreatePolicyBundleRequest{
 					Policies: bundle,
 					DryRun:   true,
 				})
@@ -123,7 +141,7 @@ This group of commands allows the management of polices to be verified against b
 				return prettyJSONEncoder(cmd.OutOrStdout()).Encode(diff)
 			},
 			Args:    cobra.ExactArgs(1),
-			Example: `policy diff ./policies --owner-id 462d67f8-b232-4da4-a7de-0c86dd667d3f`,
+			Example: `circleci policy diff ./policies --owner-id 462d67f8-b232-4da4-a7de-0c86dd667d3f`,
 		}
 		cmd.Flags().StringVar(&context, "context", "config", "policy context")
 		cmd.Flags().StringVar(&ownerID, "owner-id", "", "the id of the policy's owner")
@@ -143,7 +161,7 @@ This group of commands allows the management of polices to be verified against b
 				if len(args) == 1 {
 					policyName = args[0]
 				}
-				policies, err := policy.NewClient(*policyBaseURL, config).FetchPolicyBundle(ownerID, context, policyName)
+				policies, err := policy.NewClient(*policyBaseURL, globalConfig).FetchPolicyBundle(ownerID, context, policyName)
 				if err != nil {
 					return fmt.Errorf("failed to fetch policy bundle: %v", err)
 				}
@@ -155,7 +173,7 @@ This group of commands allows the management of polices to be verified against b
 				return nil
 			},
 			Args:    cobra.MaximumNArgs(1),
-			Example: `policy fetch --owner-id 516425b2-e369-421b-838d-920e1f51b0f5`,
+			Example: `circleci policy fetch --owner-id 516425b2-e369-421b-838d-920e1f51b0f5`,
 		}
 
 		cmd.Flags().StringVar(&context, "context", "config", "policy context")
@@ -215,7 +233,7 @@ This group of commands allows the management of polices to be verified against b
 					}()
 				}
 
-				client := policy.NewClient(*policyBaseURL, config)
+				client := policy.NewClient(*policyBaseURL, globalConfig)
 
 				output, err := func() (interface{}, error) {
 					if decisionID != "" {
@@ -223,7 +241,6 @@ This group of commands allows the management of polices to be verified against b
 					}
 					return getAllDecisionLogs(client, ownerID, context, request, cmd.ErrOrStderr())
 				}()
-
 				if err != nil {
 					return fmt.Errorf("failed to get policy decision logs: %v", err)
 				}
@@ -235,7 +252,7 @@ This group of commands allows the management of polices to be verified against b
 				return nil
 			},
 			Args:    cobra.MaximumNArgs(1),
-			Example: `policy logs --owner-id 462d67f8-b232-4da4-a7de-0c86dd667d3f --after 2022/03/14 --out output.json`,
+			Example: `circleci policy logs --owner-id 462d67f8-b232-4da4-a7de-0c86dd667d3f --after 2022/03/14 --out output.json`,
 		}
 
 		cmd.Flags().StringVar(&request.Status, "status", "", "filter decision logs based on their status")
@@ -256,13 +273,16 @@ This group of commands allows the management of polices to be verified against b
 
 	decide := func() *cobra.Command {
 		var (
-			inputPath  string
-			policyPath string
-			metaFile   string
-			ownerID    string
-			context    string
-			strict     bool
-			request    policy.DecisionRequest
+			inputPath              string
+			policyPath             string
+			meta                   string
+			metaFile               string
+			ownerID                string
+			context                string
+			strict                 bool
+			noCompile              bool
+			pipelineParamsFilePath string
+			request                policy.DecisionRequest
 		)
 
 		cmd := &cobra.Command{
@@ -272,8 +292,13 @@ This group of commands allows the management of polices to be verified against b
 				if len(args) == 1 {
 					policyPath = args[0]
 				}
-				if (policyPath == "" && ownerID == "") || (policyPath != "" && ownerID != "") {
+				if policyPath == "" && ownerID == "" {
 					return fmt.Errorf("either [policy_file_or_dir_path] or --owner-id is required")
+				}
+
+				metadata, err := readMetadata(meta, metaFile)
+				if err != nil {
+					return fmt.Errorf("failed to read metadata: %w", err)
 				}
 
 				input, err := os.ReadFile(inputPath)
@@ -281,14 +306,18 @@ This group of commands allows the management of polices to be verified against b
 					return fmt.Errorf("failed to read input file: %w", err)
 				}
 
-				var metadata map[string]interface{}
-				if metaFile != "" {
-					raw, err := os.ReadFile(metaFile)
+				if !noCompile && context == "config" {
+					compiler, err := config.NewWithConfig(globalConfig)
 					if err != nil {
-						return fmt.Errorf("failed to read meta file: %w", err)
+						return err
 					}
-					if err := yaml.Unmarshal(raw, &metadata); err != nil {
-						return fmt.Errorf("failed to decode meta content: %w", err)
+					input, err = mergeCompiledConfig(compiler, config.ProcessConfigOpts{
+						ConfigPath:             inputPath,
+						OrgID:                  ownerID,
+						PipelineParamsFilePath: pipelineParamsFilePath,
+					})
+					if err != nil {
+						return err
 					}
 				}
 
@@ -298,14 +327,14 @@ This group of commands allows the management of polices to be verified against b
 					}
 					request.Input = string(input)
 					request.Metadata = metadata
-					return policy.NewClient(*policyBaseURL, config).MakeDecision(ownerID, context, request)
+					return policy.NewClient(*policyBaseURL, globalConfig).MakeDecision(ownerID, context, request)
 				}()
 				if err != nil {
 					return fmt.Errorf("failed to make decision: %w", err)
 				}
 
-				if strict && decision.Status == cpa.StatusHardFail {
-					return fmt.Errorf("policy decision status: HARD_FAIL")
+				if strict && (decision.Status == cpa.StatusHardFail || decision.Status == cpa.StatusError) {
+					return fmt.Errorf("policy decision status: %s", decision.Status)
 				}
 
 				if err := prettyJSONEncoder(cmd.OutOrStdout()).Encode(decision); err != nil {
@@ -315,14 +344,17 @@ This group of commands allows the management of polices to be verified against b
 				return nil
 			},
 			Args:    cobra.MaximumNArgs(1),
-			Example: `policy decide ./policies --input ./.circleci/config.yml`,
+			Example: `circleci policy decide ./policies --input ./.circleci/config.yml`,
 		}
 
 		cmd.Flags().StringVar(&ownerID, "owner-id", "", "the id of the policy's owner")
 		cmd.Flags().StringVar(&context, "context", "config", "policy context for decision")
 		cmd.Flags().StringVar(&inputPath, "input", "", "path to input file")
+		cmd.Flags().StringVar(&meta, "meta", "", "decision metadata (json string)")
 		cmd.Flags().StringVar(&metaFile, "metafile", "", "decision metadata file")
 		cmd.Flags().BoolVar(&strict, "strict", false, "return non-zero status code for decision resulting in HARD_FAIL")
+		cmd.Flags().BoolVar(&noCompile, "no-compile", false, "skip config compilation (evaluate policy against source config only)")
+		cmd.Flags().StringVar(&pipelineParamsFilePath, "pipeline-parameters", "", "YAML/JSON map of pipeline parameters, accepts either YAML/JSON directly or file path (for example: my-params.yml)")
 
 		if err := cmd.MarkFlagRequired("input"); err != nil {
 			panic(err)
@@ -332,25 +364,44 @@ This group of commands allows the management of polices to be verified against b
 	}()
 
 	eval := func() *cobra.Command {
-		var inputPath, metaFile, query string
+		var (
+			inputPath              string
+			meta                   string
+			metaFile               string
+			context                string
+			ownerID                string
+			query                  string
+			noCompile              bool
+			pipelineParamsFilePath string
+		)
 		cmd := &cobra.Command{
 			Short: "perform raw opa evaluation locally",
 			Use:   "eval <policy_file_or_dir_path>",
 			RunE: func(cmd *cobra.Command, args []string) error {
 				policyPath := args[0]
+
+				metadata, err := readMetadata(meta, metaFile)
+				if err != nil {
+					return fmt.Errorf("failed to read metadata: %w", err)
+				}
+
 				input, err := os.ReadFile(inputPath)
 				if err != nil {
 					return fmt.Errorf("failed to read input file: %w", err)
 				}
 
-				var metadata map[string]interface{}
-				if metaFile != "" {
-					raw, err := os.ReadFile(metaFile)
+				if !noCompile && context == "config" {
+					compiler, err := config.NewWithConfig(globalConfig)
 					if err != nil {
-						return fmt.Errorf("failed to read meta file: %w", err)
+						return err
 					}
-					if err := yaml.Unmarshal(raw, &metadata); err != nil {
-						return fmt.Errorf("failed to decode meta content: %w", err)
+					input, err = mergeCompiledConfig(compiler, config.ProcessConfigOpts{
+						ConfigPath:             inputPath,
+						OrgID:                  ownerID,
+						PipelineParamsFilePath: pipelineParamsFilePath,
+					})
+					if err != nil {
+						return err
 					}
 				}
 
@@ -366,12 +417,17 @@ This group of commands allows the management of polices to be verified against b
 				return nil
 			},
 			Args:    cobra.ExactArgs(1),
-			Example: `policy eval ./policies --input ./.circleci/config.yml`,
+			Example: `circleci policy eval ./policies --input ./.circleci/config.yml`,
 		}
 
+		cmd.Flags().StringVar(&ownerID, "owner-id", "", "the id of the policy's owner")
 		cmd.Flags().StringVar(&inputPath, "input", "", "path to input file")
+		cmd.Flags().StringVar(&context, "context", "config", "policy context for decision")
+		cmd.Flags().StringVar(&meta, "meta", "", "decision metadata (json string)")
 		cmd.Flags().StringVar(&metaFile, "metafile", "", "decision metadata file")
 		cmd.Flags().StringVar(&query, "query", "data", "policy decision query")
+		cmd.Flags().BoolVar(&noCompile, "no-compile", false, "skip config compilation (evaluate policy against source config only)")
+		cmd.Flags().StringVar(&pipelineParamsFilePath, "pipeline-parameters", "", "YAML/JSON map of pipeline parameters, accepts either YAML/JSON directly or file path (for example: my-params.yml)")
 
 		if err := cmd.MarkFlagRequired("input"); err != nil {
 			panic(err)
@@ -389,11 +445,10 @@ This group of commands allows the management of polices to be verified against b
 		)
 
 		cmd := &cobra.Command{
-
 			Short: "get/set policy decision settings (To read settings: run command without any settings flags)",
 			Use:   "settings",
 			RunE: func(cmd *cobra.Command, args []string) error {
-				client := policy.NewClient(*policyBaseURL, config)
+				client := policy.NewClient(*policyBaseURL, globalConfig)
 
 				response, err := func() (interface{}, error) {
 					if cmd.Flag("enabled").Changed {
@@ -413,7 +468,7 @@ This group of commands allows the management of polices to be verified against b
 				return nil
 			},
 			Args:    cobra.ExactArgs(0),
-			Example: `policy settings --enabled=true`,
+			Example: `circleci policy settings --owner-id 462d67f8-b232-4da4-a7de-0c86dd667d3f --enabled=true`,
 		}
 
 		cmd.Flags().StringVar(&ownerID, "owner-id", "", "the id of the policy's owner")
@@ -426,6 +481,118 @@ This group of commands allows the management of polices to be verified against b
 		return cmd
 	}()
 
+	test := func() *cobra.Command {
+		var (
+			run     string
+			verbose bool
+			debug   bool
+			useJSON bool
+			format  string
+			ownerID string
+		)
+
+		cmd := &cobra.Command{
+			Use:          "test [path]",
+			Short:        "runs policy tests",
+			SilenceUsage: true,
+			RunE: func(cmd *cobra.Command, args []string) (err error) {
+				var include *regexp.Regexp
+				if run != "" {
+					include, err = regexp.Compile(run)
+					if err != nil {
+						return fmt.Errorf("--run value is not a valid regular expression: %w", err)
+					}
+				}
+
+				runnerOpts := tester.RunnerOptions{
+					Path:    args[0],
+					Include: include,
+					Compile: func(data []byte, pipelineValues map[string]any) ([]byte, error) {
+						parameters, _ := pipelineValues["parameters"].(map[string]any)
+						delete(pipelineValues, "parameters")
+
+						host := config.GetCompileHost(globalConfig.Host)
+						client := rest.NewFromConfig(host, globalConfig)
+
+						req, err := client.NewRequest(
+							"POST",
+							&url.URL{Path: "compile-config-with-defaults"},
+							config.CompileConfigRequest{
+								ConfigYaml: string(data),
+								Options: config.Options{
+									OwnerID:            ownerID,
+									PipelineValues:     config.LocalPipelineValues(parameters),
+									PipelineParameters: parameters,
+								},
+							},
+						)
+						if err != nil {
+							return nil, fmt.Errorf("an error occurred creating the request: %w", err)
+						}
+
+						var resp config.ConfigResponse
+						if _, err := client.DoRequest(req, &resp); err != nil {
+							return nil, fmt.Errorf("failed to get compilation response: %w", err)
+						}
+
+						if len(resp.Errors) > 0 {
+							messages := make([]error, len(resp.Errors))
+							for i := range resp.Errors {
+								messages[i] = errors.New(resp.Errors[i].Message)
+							}
+							return nil, errors.Join(messages...)
+						}
+
+						return []byte(resp.OutputYaml), nil
+					},
+				}
+
+				runner, err := tester.NewRunner(runnerOpts)
+				if err != nil {
+					return fmt.Errorf("cannot instantiate runner: %w", err)
+				}
+
+				handlerOpts := tester.ResultHandlerOptions{
+					Verbose: verbose,
+					Debug:   debug,
+					Dst:     cmd.OutOrStdout(),
+				}
+
+				handler := func() tester.ResultHandler {
+					switch strings.ToLower(format) {
+					case "json":
+						return tester.MakeJSONResultHandler(handlerOpts)
+					case "junit":
+						return tester.MakeJUnitResultHandler(handlerOpts)
+					default:
+						if useJSON {
+							return tester.MakeJSONResultHandler(handlerOpts)
+						}
+						return tester.MakeDefaultResultHandler(handlerOpts)
+					}
+				}()
+
+				if !runner.RunAndHandleResults(handler) {
+					return errors.New("unsuccessful run")
+				}
+
+				return nil
+			},
+			Args:    cobra.ExactArgs(1),
+			Example: "circleci policy test ./policies/...",
+		}
+
+		cmd.Flags().StringVar(&run, "run", "", "select which tests to run based on regular expression")
+		cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "print all tests instead of only failed tests")
+		cmd.Flags().BoolVar(&debug, "debug", false, "print test debug context. Sets verbose to true")
+		cmd.Flags().BoolVar(&useJSON, "json", false, "sprints json test results instead of standard output format")
+		cmd.Flags().StringVar(&format, "format", "", "select desired format between json or junit")
+		cmd.Flags().StringVar(&ownerID, "owner-id", "", "the id of the policy's owner")
+
+		_ = cmd.Flags().MarkDeprecated("json", "use --format=json to print json test results")
+		return cmd
+	}()
+
 	cmd.AddCommand(push)
 	cmd.AddCommand(diff)
 	cmd.AddCommand(fetch)
@@ -433,8 +600,50 @@ This group of commands allows the management of polices to be verified against b
 	cmd.AddCommand(decide)
 	cmd.AddCommand(eval)
 	cmd.AddCommand(settings)
+	cmd.AddCommand(test)
 
 	return cmd
+}
+
+func mergeCompiledConfig(compiler *config.ConfigCompiler, processConfigOpts config.ProcessConfigOpts) ([]byte, error) {
+	var sourceConfigMap, compiledConfigMap map[string]any
+	var err error
+
+	response, err := compiler.ProcessConfig(processConfigOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile config: %w", err)
+	}
+	if err != yaml.Unmarshal([]byte(response.OutputYaml), &compiledConfigMap) {
+		return nil, fmt.Errorf("compiled config is not a valid yaml: %w", err)
+	}
+	err = yaml.Unmarshal([]byte(response.SourceYaml), &sourceConfigMap)
+	if err != nil {
+		return nil, fmt.Errorf("source config is not a valid yaml: %w", err)
+	}
+	sourceConfigMap["_compiled_"] = compiledConfigMap
+	return yaml.Marshal(sourceConfigMap)
+}
+
+func readMetadata(meta string, metaFile string) (map[string]interface{}, error) {
+	var metadata map[string]interface{}
+	if meta != "" && metaFile != "" {
+		return nil, fmt.Errorf("use either --meta or --metafile flag, but not both")
+	}
+	if meta != "" {
+		if err := json.Unmarshal([]byte(meta), &metadata); err != nil {
+			return nil, fmt.Errorf("failed to decode meta content: %w", err)
+		}
+	}
+	if metaFile != "" {
+		raw, err := os.ReadFile(metaFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read meta file: %w", err)
+		}
+		if err := yaml.Unmarshal(raw, &metadata); err != nil {
+			return nil, fmt.Errorf("failed to decode metafile content: %w", err)
+		}
+	}
+	return metadata, nil
 }
 
 // prettyJSONEncoder takes a writer and returns a new json encoder with indent set to two space characters

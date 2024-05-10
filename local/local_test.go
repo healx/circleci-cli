@@ -1,7 +1,7 @@
 package local
 
 import (
-	"io/ioutil"
+	"io"
 	"os"
 
 	. "github.com/onsi/ginkgo"
@@ -17,28 +17,27 @@ var _ = Describe("build", func() {
 		It("can generate a command line", func() {
 			home, err := os.UserHomeDir()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(generateDockerCommand("/config/path", "docker-image-name", "/current/directory", "extra-1", "extra-2")).To(ConsistOf(
+			Expect(generateDockerCommand("/tempdir", "/config/path", "docker-image-name", "/current/directory", "build", "/var/run/docker.sock", "extra-1", "extra-2")).To(ConsistOf(
 				"docker",
 				"run",
-				"--interactive",
-				"--tty",
 				"--rm",
-				"--volume", "/var/run/docker.sock:/var/run/docker.sock",
-				"--volume", "/config/path:/tmp/local_build_config.yml",
-				"--volume", "/current/directory:/current/directory",
-				"--volume", home+"/.circleci:/root/.circleci",
+				"--mount", "type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock",
+				"--mount", "type=bind,src=/config/path,dst=/tempdir/local_build_config.yml",
+				"--mount", "type=bind,src=/current/directory,dst=/current/directory",
+				"--mount", "type=bind,src="+home+"/.circleci,dst=/root/.circleci",
 				"--workdir", "/current/directory",
 				"docker-image-name", "circleci", "build",
-				"--config", "/tmp/local_build_config.yml",
+				"--config", "/tempdir/local_build_config.yml",
+				"--job", "build",
 				"extra-1", "extra-2",
 			))
 		})
 
 		It("can write temp files", func() {
-			path, err := writeStringToTempFile("cynosure")
+			path, err := writeStringToTempFile("/tmp", "cynosure")
 			Expect(err).NotTo(HaveOccurred())
 			defer os.Remove(path)
-			Expect(ioutil.ReadFile(path)).To(BeEquivalentTo("cynosure"))
+			Expect(os.ReadFile(path)).To(BeEquivalentTo("cynosure"))
 		})
 	})
 
@@ -50,7 +49,7 @@ var _ = Describe("build", func() {
 			// add a 'debug' flag - the build command will inherit this from the
 			// root command when not testing in isolation.
 			flags.Bool("debug", false, "Enable debug logging.")
-			flags.SetOutput(ioutil.Discard)
+			flags.SetOutput(io.Discard)
 			err := flags.Parse(args)
 			return flags, err
 		}
@@ -92,9 +91,9 @@ var _ = Describe("build", func() {
 			}),
 
 			Entry("many args", TestCase{
-				input:              []string{"--job", "horse", "--config", "foo", "--index", "9", "d"},
+				input:              []string{"--config", "foo", "--index", "9", "d"},
 				expectedConfigPath: "foo",
-				expectedArgs:       []string{"--index", "9", "--job", "horse", "d"},
+				expectedArgs:       []string{"--index", "9", "d"},
 			}),
 
 			Entry("many args, multiple envs", TestCase{

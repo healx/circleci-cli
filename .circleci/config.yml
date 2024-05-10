@@ -2,20 +2,22 @@ version: 2.1
 
 orbs:
   shellcheck: circleci/shellcheck@1.2.0
-  windows: circleci/windows@2.2.0
+  snyk: snyk/snyk@1.7.0
+  windows: circleci/windows@5.0.0
 
 executors:
   go:
     docker:
-      - image: cimg/go:1.18
+      - image: cimg/go:1.21.5
+    resource_class: large
     environment:
       CGO_ENABLED: 0
   mac:
     macos:
-      xcode: 12.5.1
+      xcode: 15.1.0
+    resource_class: macos.m1.medium.gen1
     environment:
       CGO_ENABLED: 0
-      HOMEBREW_NO_AUTO_UPDATE: 1
       TERM: xterm-256color
 
 commands:
@@ -25,7 +27,7 @@ commands:
           # https://app.circleci.com/jobs/github/CircleCI-Public/circleci-cli/6480
           #     curl: (92) HTTP/2 stream 0 was not closed cleanly: PROTOCOL_ERROR (err 1)
           # The issue seems to be on the server-side, so force HTTP 1.1
-          name: 'cURL: Force HTTP 1.1'
+          name: "cURL: Force HTTP 1.1"
           command: echo '--http1.1' >> ~/.curlrc
   build-docker-image:
     steps:
@@ -41,36 +43,31 @@ commands:
           command: |
             docker build -t circleci/circleci-cli:0.1.$CIRCLE_BUILD_NUM-alpine --file Dockerfile.alpine .
             docker run --rm circleci/circleci-cli:0.1.$CIRCLE_BUILD_NUM-alpine update check
-  deploy-save-cache-workspace-and-artifacts:
+  deploy-save-workspace-and-artifacts:
     steps:
-      - save_cache:
-          key: v4-goreleaser-{{ checksum "~/goreleaser_amd64.deb" }}
-          paths: [~/goreleaser_amd64.deb]
       - persist_to_workspace:
           root: .
           paths:
-            - 'dist'
+            - "dist"
       - store_artifacts:
           path: ./dist
           destination: dist
   install-goreleaser:
     parameters:
-      GORELEASER_URL:
+      version:
         type: string
-        default: https://github.com/goreleaser/goreleaser/releases/download/v0.127.0/goreleaser_amd64.deb
+        default: "1.19.1"
     steps:
-      - restore_cache:
-          keys: [v5-goreleaser-]
       - run:
           name: Install GoReleaser
           command: |
-            [ -f ~/goreleaser_amd64.deb ] || curl --silent --location --fail --retry 3 << parameters.GORELEASER_URL >> > ~/goreleaser_amd64.deb
-            sudo apt-get update -y
-            sudo apt install ~/goreleaser_amd64.deb
+            echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
+            sudo apt -q update -y
+            sudo apt -q install -y --no-install-recommends goreleaser=<< parameters.version >>
   gomod:
     steps:
       - restore_cache:
-          keys: ['v3-gomod-{{ arch }}-']
+          keys: ["v3-gomod-{{ arch }}-"]
       - run:
           name: Download go module dependencies
           command: go mod download
@@ -82,19 +79,21 @@ commands:
 
 jobs:
   test_windows:
-    executor: windows/default
+    executor:
+      name: windows/default
+      shell: bash --login -eo pipefail
     steps:
       - run: git config --global core.autocrlf false
       - checkout
-      - run: setx GOPATH %USERPROFILE%\go
-      - run: go get gotest.tools/gotestsum
       - run: mkdir test_results
-      - run: setx TESTING "true"
 
       - run:
           name: Run tests
           command: |
-            C:\Users\circleci\go\bin\gotestsum.exe --junitfile test_results/windows.xml
+            export GOBIN=/c/go/bin
+            export PATH=$GOBIN:$PATH
+            go install gotest.tools/gotestsum@latest
+            gotestsum --junitfile test_results/windows.xml
       - store_test_results:
           path: test_results
       - store_artifacts:
@@ -104,9 +103,9 @@ jobs:
     steps:
       - checkout
       - run: |
-          brew update
-          brew install go@1.18
-          echo 'export PATH="/usr/local/opt/go@1.18/bin:$PATH"' >> ~/.bash_profile
+          curl -OL https://go.dev/dl/go1.21.5.darwin-arm64.pkg
+          sudo installer -pkg ./go1.21.5.darwin-arm64.pkg -target /
+          echo 'export PATH="/usr/local/go/bin:$PATH"' >> ~/.bash_profile
       - gomod
       - run: make test
   build:
@@ -118,7 +117,7 @@ jobs:
       - persist_to_workspace:
           root: .
           paths:
-            - 'build'
+            - "build"
   cucumber:
     docker:
       - image: cimg/ruby:2.7
@@ -127,7 +126,7 @@ jobs:
       - attach_workspace:
           at: .
       - run:
-          name: 'Install CLI tool from workspace'
+          name: "Install CLI tool from workspace"
           command: sudo cp ~/project/build/linux/amd64/circleci /usr/local/bin/
       - run:
           command: bundle install
@@ -135,8 +134,10 @@ jobs:
       - run:
           command: bundle exec cucumber
           working_directory: integration_tests
-          environment:
-            TESTING: "true"
+      - run:
+          name: "Make sure simple command do not cause any timeout"
+          command: circleci version
+
   test:
     executor: go
     steps:
@@ -176,7 +177,7 @@ jobs:
 
   lint:
     docker:
-      - image: golangci/golangci-lint:v1.46-alpine
+      - image: golangci/golangci-lint:v1.51.0-alpine
     resource_class: large
     steps:
       - checkout
@@ -206,7 +207,7 @@ jobs:
           docker_layer_caching: true
       - build-docker-image
       - build-alpine-image
-      - deploy-save-cache-workspace-and-artifacts
+      - deploy-save-workspace-and-artifacts
 
   deploy:
     executor: go
@@ -243,7 +244,7 @@ jobs:
             docker push     circleci/circleci-cli:0.1.$CIRCLE_BUILD_NUM-alpine
             docker tag      circleci/circleci-cli:0.1.$CIRCLE_BUILD_NUM-alpine circleci/circleci-cli:alpine
             docker push     circleci/circleci-cli:alpine
-      - deploy-save-cache-workspace-and-artifacts
+      - deploy-save-workspace-and-artifacts
 
   snap:
     docker:
@@ -253,7 +254,7 @@ jobs:
       - attach_workspace:
           at: .
       - run: |
-          TAG=$(./dist/circleci-cli_linux_amd64/circleci version | cut -d' ' -f 1) && export TAG
+          TAG=$(./dist/circleci-cli_linux_amd64_v1/circleci version | cut -d' ' -f 1) && export TAG
           sed -i -- "s/%CLI_VERSION_PLACEHOLDER%/$TAG/g" snap/snapcraft.yaml
       - run: snapcraft
       - run:
@@ -267,9 +268,9 @@ jobs:
   brew-deploy:
     executor: mac
     environment:
-      - USER: circleci
-      - TRAVIS: circleci
-      - DESTDIR: /Users/distiller/dest
+      USER: circleci
+      TRAVIS: circleci
+      DESTDIR: /Users/distiller/dest
     steps:
       - checkout
       - force-http-1
@@ -280,6 +281,7 @@ jobs:
           git config --global user.email "$GH_EMAIL" > /dev/null 2>&1
           git config --global user.name "$GH_NAME" > /dev/null 2>&1
       - run: brew --version
+      - run: brew tap --force homebrew/core
       - run: ./.circleci/brew-deploy.sh
 
   chocolatey-deploy:
@@ -301,6 +303,46 @@ jobs:
           command: choco push circleci-cli.nupkg --source https://chocolatey.org/ --apikey $env:CHOCO_API_KEY
           working_directory: chocolatey
 
+  vulnerability-scan:
+    executor: go
+    steps:
+      - checkout
+      - run:
+          name: Setup Scanning
+          command: |
+            git config --global url."https://$GITHUB_USER:$GITHUB_TOKEN@github.com/circleci/".insteadOf "https://github.com/circleci/"
+      - when:
+          condition:
+            or:
+              - equal: [main, << pipeline.git.branch >>]
+          steps:
+            - run:
+                name: Launching Snyk Orb Scanning
+                command: echo "Running snyk/scan on main; uploading the results"
+            - run:
+                name: Cleanup RemoteRepoURL
+                command: echo 'export REMOTE_REPO_URL="${CIRCLE_REPOSITORY_URL%".git"}"' >> "$BASH_ENV"
+            - snyk/scan:
+                organization: "circleci-public"
+                fail-on-issues: true
+                severity-threshold: high
+                monitor-on-build: true
+                additional-arguments: "--all-projects --remote-repo-url=${REMOTE_REPO_URL} -d"
+      - unless:
+          condition:
+            or:
+              - equal: [main, << pipeline.git.branch >>]
+          steps:
+            - run:
+                name: Launching Snyk Orb Scanning
+                command: echo "Running snyk/scan on branch; not uploading the results"
+            - snyk/scan:
+                organization: "circleci-public"
+                fail-on-issues: true
+                severity-threshold: high
+                monitor-on-build: false
+                additional-arguments: "--all-projects -d"
+
 workflows:
   ci:
     jobs:
@@ -314,6 +356,8 @@ workflows:
       - test_windows
       - coverage
       - lint
+      - vulnerability-scan:
+          context: org-global-employees
       - deploy-test
       - docs:
           requires:
@@ -332,14 +376,20 @@ workflows:
       - brew-deploy:
           requires:
             - run-brew-deploy-gate
+          context:
+            - devex-release
       - deploy:
           requires:
+            - cucumber
             - test
             - test_mac
             - coverage
             - lint
             - deploy-test
             - shellcheck/check
+            - vulnerability-scan
           filters:
             branches:
-              only: master
+              only: main
+          context:
+            - devex-release

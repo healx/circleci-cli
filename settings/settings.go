@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,26 +14,42 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CircleCI-Public/circleci-cli/data"
 	yaml "gopkg.in/yaml.v3"
+
+	"github.com/CircleCI-Public/circleci-cli/api/header"
+	"github.com/CircleCI-Public/circleci-cli/data"
+	"github.com/spf13/afero"
+)
+
+var (
+	FS afero.Afero = afero.Afero{
+		Fs: afero.NewOsFs(),
+	}
 )
 
 // Config is used to represent the current state of a CLI instance.
 type Config struct {
-	Host            string            `yaml:"host"`
-	Endpoint        string            `yaml:"endpoint"`
-	Token           string            `yaml:"token"`
-	RestEndpoint    string            `yaml:"rest_endpoint"`
-	TLSCert         string            `yaml:"tls_cert"`
-	TLSInsecure     bool              `yaml:"tls_insecure"`
-	HTTPClient      *http.Client      `yaml:"-"`
-	Data            *data.DataBag     `yaml:"-"`
-	Debug           bool              `yaml:"-"`
-	Address         string            `yaml:"-"`
-	FileUsed        string            `yaml:"-"`
-	GitHubAPI       string            `yaml:"-"`
-	SkipUpdateCheck bool              `yaml:"-"`
-	OrbPublishing   OrbPublishingInfo `yaml:"orb_publishing"`
+	Host            string        `yaml:"host"`
+	DlHost          string        `yaml:"-"`
+	Endpoint        string        `yaml:"endpoint"`
+	Token           string        `yaml:"token"`
+	RestEndpoint    string        `yaml:"rest_endpoint"`
+	TLSCert         string        `yaml:"tls_cert"`
+	TLSInsecure     bool          `yaml:"tls_insecure"`
+	HTTPClient      *http.Client  `yaml:"-"`
+	Data            *data.DataBag `yaml:"-"`
+	Debug           bool          `yaml:"-"`
+	Address         string        `yaml:"-"`
+	FileUsed        string        `yaml:"-"`
+	GitHubAPI       string        `yaml:"-"`
+	SkipUpdateCheck bool          `yaml:"-"`
+	// Parameter used to disable telemetry from tests
+	IsTelemetryDisabled bool `yaml:"-"`
+	// If this value is defined, the telemetry will write all its events a file
+	// The value of this field is the path where the telemetry will be written
+	MockTelemetry string            `yaml:"-"`
+	OrbPublishing OrbPublishingInfo `yaml:"orb_publishing"`
+	TempDir       string            `yaml:"temp_dir,omitempty"`
 }
 
 type OrbPublishingInfo struct {
@@ -49,6 +64,14 @@ type UpdateCheck struct {
 	FileUsed        string    `yaml:"-"`
 }
 
+// TelemetrySettings is used to represent telemetry related settings
+type TelemetrySettings struct {
+	IsEnabled         bool   `yaml:"is_enabled"`
+	HasAnsweredPrompt bool   `yaml:"has_answered_prompt"`
+	UniqueID          string `yaml:"unique_id"`
+	UserID            string `yaml:"user_id"`
+}
+
 // Load will read the update check settings from the user's disk and then deserialize it into the current instance.
 func (upd *UpdateCheck) Load() error {
 	path := filepath.Join(SettingsPath(), updateCheckFilename())
@@ -59,7 +82,7 @@ func (upd *UpdateCheck) Load() error {
 
 	upd.FileUsed = path
 
-	content, err := ioutil.ReadFile(path) // #nosec
+	content, err := os.ReadFile(path) // #nosec
 	if err != nil {
 		return err
 	}
@@ -75,7 +98,36 @@ func (upd *UpdateCheck) WriteToDisk() error {
 		return err
 	}
 
-	err = ioutil.WriteFile(upd.FileUsed, enc, 0600)
+	err = os.WriteFile(upd.FileUsed, enc, 0600)
+	return err
+}
+
+// Load will read the telemetry settings from the user's disk and then deserialize it into the current instance.
+func (tel *TelemetrySettings) Load() error {
+	path := filepath.Join(SettingsPath(), telemetryFilename())
+
+	if err := ensureSettingsFileExists(path); err != nil {
+		return err
+	}
+
+	content, err := FS.ReadFile(path) // #nosec
+	if err != nil {
+		return err
+	}
+
+	err = yaml.Unmarshal(content, &tel)
+	return err
+}
+
+// WriteToDisk will write the telemetry settings to disk by serializing the YAML
+func (tel *TelemetrySettings) Write() error {
+	enc, err := yaml.Marshal(&tel)
+	if err != nil {
+		return err
+	}
+
+	path := filepath.Join(SettingsPath(), telemetryFilename())
+	err = FS.WriteFile(path, enc, 0600)
 	return err
 }
 
@@ -100,7 +152,7 @@ func (cfg *Config) LoadFromDisk() error {
 
 	cfg.FileUsed = path
 
-	content, err := ioutil.ReadFile(path) // #nosec
+	content, err := os.ReadFile(path) // #nosec
 	if err != nil {
 		return err
 	}
@@ -120,7 +172,7 @@ func (cfg *Config) WriteToDisk() error {
 		return err
 	}
 
-	err = ioutil.WriteFile(cfg.FileUsed, enc, 0600)
+	err = os.WriteFile(cfg.FileUsed, enc, 0600)
 	return err
 }
 
@@ -158,6 +210,11 @@ func updateCheckFilename() string {
 func configFilename() string {
 	// TODO: Make this configurable
 	return "cli.yml"
+}
+
+// telemetryFilename returns the name of the cli telemetry file
+func telemetryFilename() string {
+	return "telemetry.yml"
 }
 
 // settingsPath returns the path of the CLI settings directory
@@ -210,7 +267,7 @@ func (cfg *Config) WithHTTPClient() error {
 			return fmt.Errorf("invalid tls cert provided: %s", err.Error())
 		}
 
-		pemData, err := ioutil.ReadFile(cfg.TLSCert)
+		pemData, err := os.ReadFile(cfg.TLSCert)
 		if err != nil {
 			return fmt.Errorf("unable to read tls cert: %s", err.Error())
 		}
@@ -232,7 +289,7 @@ func (cfg *Config) WithHTTPClient() error {
 	customTransport.TLSClientConfig = tlsConfig
 
 	cfg.HTTPClient = &http.Client{
-		Timeout:   60 * time.Second,
+		Timeout:   header.GetDefaultTimeout(),
 		Transport: customTransport,
 	}
 

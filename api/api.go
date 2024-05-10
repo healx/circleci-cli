@@ -3,15 +3,16 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/CircleCI-Public/circleci-cli/api/graphql"
-	"github.com/CircleCI-Public/circleci-cli/pipeline"
+	"github.com/CircleCI-Public/circleci-cli/api/rest"
 	"github.com/CircleCI-Public/circleci-cli/references"
 	"github.com/CircleCI-Public/circleci-cli/settings"
 	"github.com/Masterminds/semver"
@@ -25,6 +26,17 @@ const (
 	Add UpdateOrbCategorizationRequestType = iota
 	Remove
 )
+
+type ErrorWithMessage struct {
+	Message string `json:"message"`
+}
+
+func (e ErrorWithMessage) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return "unknown error"
+}
 
 // GQLErrorsCollection is a slice of errors returned by the GraphQL server.
 // Each error is made up of a GQLResponseError type.
@@ -181,13 +193,6 @@ type RenameNamespaceResponse struct {
 		}
 
 		Errors GQLErrorsCollection
-	}
-}
-
-// GetOrganizationResponse type wraps the GQL response for fetching an organization and ID.
-type GetOrganizationResponse struct {
-	Organization struct {
-		ID string
 	}
 }
 
@@ -485,9 +490,9 @@ func loadYaml(path string) (string, error) {
 	var err error
 	var config []byte
 	if path == "-" {
-		config, err = ioutil.ReadAll(os.Stdin)
+		config, err = io.ReadAll(os.Stdin)
 	} else {
-		config, err = ioutil.ReadFile(path)
+		config, err = os.ReadFile(path)
 	}
 
 	if err != nil {
@@ -511,161 +516,6 @@ func WhoamiQuery(cl *graphql.Client) (*WhoamiResponse, error) {
 	}
 
 	return &response, nil
-}
-
-// ConfigQueryLegacy calls the GQL API to validate and process config with the legacy orgSlug
-func ConfigQueryLegacy(cl *graphql.Client, configPath string, orgSlug string, params pipeline.Parameters, values pipeline.Values) (*ConfigResponse, error) {
-	var response BuildConfigResponse
-	var query string
-	config, err := loadYaml(configPath)
-	if err != nil {
-		return nil, err
-	}
-	// GraphQL isn't forwards-compatible, so we are unusually selective here about
-	// passing only non-empty fields on to the API, to minimize user impact if the
-	// backend is out of date.
-	var fieldAddendums string
-	if orgSlug != "" {
-		fieldAddendums += ", orgSlug: $orgSlug"
-	}
-	if len(params) > 0 {
-		fieldAddendums += ", pipelineParametersJson: $pipelineParametersJson"
-	}
-	query = fmt.Sprintf(
-		`query ValidateConfig ($config: String!, $pipelineParametersJson: String, $pipelineValues: [StringKeyVal!], $orgSlug: String) {
-			buildConfig(configYaml: $config, pipelineValues: $pipelineValues%s) {
-				valid,
-				errors { message },
-				sourceYaml,
-				outputYaml
-			}
-		}`,
-		fieldAddendums)
-
-	request := graphql.NewRequest(query)
-	request.Var("config", config)
-
-	if values != nil {
-		request.Var("pipelineValues", pipeline.PrepareForGraphQL(values))
-	}
-	if params != nil {
-		pipelineParameters, err := json.Marshal(params)
-		if err != nil {
-			return nil, fmt.Errorf("unable to serialize pipeline values: %s", err.Error())
-		}
-		request.Var("pipelineParametersJson", string(pipelineParameters))
-	}
-
-	if orgSlug != "" {
-		request.Var("orgSlug", orgSlug)
-	}
-
-	request.SetToken(cl.Token)
-
-	err = cl.Run(request, &response)
-	if err != nil {
-		return nil, errors.Wrap(err, "Unable to validate config")
-	}
-	if len(response.BuildConfig.ConfigResponse.Errors) > 0 {
-		return nil, &response.BuildConfig.ConfigResponse.Errors
-	}
-
-	return &response.BuildConfig.ConfigResponse, nil
-}
-
-// ConfigQuery calls the GQL API to validate and process config with the org id
-func ConfigQuery(cl *graphql.Client, configPath string, orgId string, params pipeline.Parameters, values pipeline.Values) (*ConfigResponse, error) {
-	var response BuildConfigResponse
-	var query string
-	config, err := loadYaml(configPath)
-	if err != nil {
-		return nil, err
-	}
-	// GraphQL isn't forwards-compatible, so we are unusually selective here about
-	// passing only non-empty fields on to the API, to minimize user impact if the
-	// backend is out of date.
-	var fieldAddendums string
-	if orgId != "" {
-		fieldAddendums += ", orgId: $orgId"
-	}
-	if len(params) > 0 {
-		fieldAddendums += ", pipelineParametersJson: $pipelineParametersJson"
-	}
-	query = fmt.Sprintf(
-		`query ValidateConfig ($config: String!, $pipelineParametersJson: String, $pipelineValues: [StringKeyVal!], $orgId: UUID!) {
-			buildConfig(configYaml: $config, pipelineValues: $pipelineValues%s) {
-				valid,
-				errors { message },
-				sourceYaml,
-				outputYaml
-			}
-		}`,
-		fieldAddendums)
-
-	request := graphql.NewRequest(query)
-	request.Var("config", config)
-
-	if values != nil {
-		request.Var("pipelineValues", pipeline.PrepareForGraphQL(values))
-	}
-	if params != nil {
-		pipelineParameters, err := json.Marshal(params)
-		if err != nil {
-			return nil, fmt.Errorf("unable to serialize pipeline values: %s", err.Error())
-		}
-		request.Var("pipelineParametersJson", string(pipelineParameters))
-	}
-
-	if orgId != "" {
-		request.Var("orgId", orgId)
-	}
-	request.SetToken(cl.Token)
-
-	err = cl.Run(request, &response)
-	if err != nil {
-		return nil, errors.Wrap(err, "Unable to validate config")
-	}
-	if len(response.BuildConfig.ConfigResponse.Errors) > 0 {
-		return nil, &response.BuildConfig.ConfigResponse.Errors
-	}
-
-	return &response.BuildConfig.ConfigResponse, nil
-}
-
-// OrbQuery validated and processes an orb.
-func OrbQuery(cl *graphql.Client, configPath string) (*ConfigResponse, error) {
-	var response OrbConfigResponse
-
-	config, err := loadYaml(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	query := `
-		query ValidateOrb ($config: String!) {
-			orbConfig(orbYaml: $config) {
-				valid,
-				errors { message },
-				sourceYaml,
-				outputYaml
-			}
-		}`
-
-	request := graphql.NewRequest(query)
-	request.Var("config", config)
-	request.SetToken(cl.Token)
-
-	err = cl.Run(request, &response)
-
-	if err != nil {
-		return nil, errors.Wrap(err, "Unable to validate config")
-	}
-
-	if len(response.OrbConfig.ConfigResponse.Errors) > 0 {
-		return nil, response.OrbConfig.ConfigResponse.Errors
-	}
-
-	return &response.OrbConfig.ConfigResponse, nil
 }
 
 // OrbImportVersion publishes a new version of an orb using the provided source and id.
@@ -898,30 +748,54 @@ func CreateNamespaceWithOwnerID(cl *graphql.Client, name string, ownerID string)
 	return &response, nil
 }
 
-func getOrganization(cl *graphql.Client, organizationName string, organizationVcs string) (*GetOrganizationResponse, error) {
-	var response GetOrganizationResponse
+type GetOrganizationParams struct {
+	OrgName string
+	VCSType string
+	OrgID   string
+}
 
-	query := `query($organizationName: String!, $organizationVcs: VCSType!) {
-				organization(
-					name: $organizationName
-					vcsType: $organizationVcs
-				) {
-					id
-				}
-			}`
+// GetOrganizationResponse type wraps the GQL response for fetching an organization and ID.
+type GetOrganizationResponse struct {
+	Organization struct {
+		ID      string
+		Name    string
+		VCSType string
+	}
+}
 
-	request := graphql.NewRequest(query)
-	request.SetToken(cl.Token)
-
-	request.Var("organizationName", organizationName)
-	request.Var("organizationVcs", strings.ToUpper(organizationVcs))
-
-	err := cl.Run(request, &response)
-
-	if err != nil {
-		return nil, errors.Wrapf(err, "Unable to find organization %s of vcs-type %s", organizationName, organizationVcs)
+func GetOrganization(cl *graphql.Client, params GetOrganizationParams) (*GetOrganizationResponse, error) {
+	if params.OrgID == "" && (params.VCSType == "" || params.OrgName == "") {
+		return nil, errors.New("need to define either org-id or vcs-type and org name")
 	}
 
+	var request *graphql.Request
+	if params.OrgID != "" {
+		request = graphql.NewRequest(`query($orgId: ID!) {
+	organization(id: $orgId) {
+		id
+		name
+		vcsType
+	}
+}`)
+		request.Var("orgId", params.OrgID)
+	} else {
+		request = graphql.NewRequest(`query($orgName: String!, $vcsType: VCSType!) {
+	organization(name: $orgName, vcsType: $vcsType) {
+		id
+		name
+		vcsType
+	}
+}`)
+		request.Var("orgName", params.OrgName)
+		request.Var("vcsType", strings.ToUpper(params.VCSType))
+	}
+
+	var response GetOrganizationResponse
+	request.SetToken(cl.Token)
+	err := cl.Run(request, &response)
+	if err != nil {
+		return nil, errors.Wrap(err, "fetching organization")
+	}
 	return &response, nil
 }
 
@@ -1011,7 +885,7 @@ mutation($id: UUID!) {
 
 // CreateNamespace creates (reserves) a namespace for an organization
 func CreateNamespace(cl *graphql.Client, name string, organizationName string, organizationVcs string) (*CreateNamespaceResponse, error) {
-	getOrgResponse, getOrgError := getOrganization(cl, organizationName, organizationVcs)
+	getOrgResponse, getOrgError := GetOrganization(cl, GetOrganizationParams{OrgName: organizationName, VCSType: organizationVcs})
 
 	if getOrgError != nil {
 		return nil, errors.Wrap(organizationNotFound(organizationName, organizationVcs), getOrgError.Error())
@@ -1354,18 +1228,18 @@ func OrbSetOrbListStatus(cl *graphql.Client, namespace string, orb string, list 
 	var response OrbSetOrbListStatusResponse
 
 	query := `
-		mutation($orbId: UUID!, $list: Boolean!) {
-			setOrbListStatus(
-				orbId: $orbId,
-				list: $list
-			) {
-				listed
-				errors { 
-					message
-					type 
-				}
-			}
+mutation($orbId: UUID!, $list: Boolean!) {
+	setOrbListStatus(
+		orbId: $orbId,
+		list: $list
+	) {
+		listed
+		errors {
+			message
+			type
 		}
+	}
+}
 	`
 
 	request := graphql.NewRequest(query)
@@ -1634,6 +1508,7 @@ query namespaceOrbs ($namespace: String, $after: String!) {
 
 	for {
 		request := graphql.NewRequest(query)
+		request.SetToken(cl.Token)
 		request.Var("after", currentCursor)
 		request.Var("namespace", namespace)
 
@@ -1813,7 +1688,7 @@ func OrbCategoryID(cl *graphql.Client, name string) (*OrbCategoryIDResponse, err
 	}`
 
 	request := graphql.NewRequest(query)
-
+	request.SetToken(cl.Token)
 	request.Var("name", name)
 
 	err := cl.Run(request, &response)
@@ -1917,6 +1792,7 @@ func ListOrbCategories(cl *graphql.Client) (*OrbCategoriesForListing, error) {
 
 	for {
 		request := graphql.NewRequest(query)
+		request.SetToken(cl.Token)
 		request.Var("after", currentCursor)
 
 		err := cl.Run(request, &result)
@@ -1952,7 +1828,9 @@ func FollowProject(config settings.Config, vcs string, owner string, projectName
 	}
 	r.Header.Set("Content-Type", "application/json; charset=utf-8")
 	r.Header.Set("Accept", "application/json; charset=utf-8")
-	r.Header.Set("Circle-Token", config.Token)
+	if config.Token != "" {
+		r.Header.Set("Circle-Token", config.Token)
+	}
 
 	response, err := config.HTTPClient.Do(r)
 	if err != nil {
@@ -1969,4 +1847,21 @@ func FollowProject(config settings.Config, vcs string, owner string, projectName
 	}
 
 	return fr, nil
+}
+
+type Me struct {
+	ID    string `json:"id"`
+	Login string `json:"login"`
+	Name  string `json:"name"`
+}
+
+func GetMe(client *rest.Client) (Me, error) {
+	req, err := client.NewRequest("GET", &url.URL{Path: "me"}, nil)
+	if err != nil {
+		return Me{}, errors.Wrap(err, "Unable to get user info")
+	}
+
+	var me Me
+	_, err = client.DoRequest(req, &me)
+	return me, err
 }
